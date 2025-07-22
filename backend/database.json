@@ -1,0 +1,11 @@
+{
+  "dev": {
+    "driver": "pg",
+    "host": "localhost",
+    "port": 5432,
+    "database": "license_mgnt",
+    "username": "postgres",
+    "password": "Start123",
+    "schema": "public"
+  }
+}
