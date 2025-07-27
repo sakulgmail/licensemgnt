@@ -188,6 +188,7 @@ const Licenses = () => {
   const [orderBy, setOrderBy] = useState('name');
   const [order, setOrder] = useState('asc');
   const [viewMode, setViewMode] = useState(false);
+  const [searchType, setSearchType] = useState('license'); // 'license', 'customer', or 'vendor'
 
   // Debounce function
   const debounce = (func, delay) => {
@@ -211,7 +212,7 @@ const Licenses = () => {
       setSearchTerm(value);
       setPage(0);
     }
-  }, 300), [searchTerm]);
+  }, 300), [searchTerm, searchType]);
 
   // Handle search input change
   const handleSearchChange = (event) => {
@@ -342,9 +343,19 @@ const Licenses = () => {
       
       const params = { 
         limit: rowsPerPage,
-        page: page + 1,
-        ...(currentSearchTerm && { search: currentSearchTerm })
+        page: page + 1
       };
+      
+      // Add search parameters based on search type
+      if (currentSearchTerm) {
+        if (searchType === 'customer') {
+          params.customer_search = currentSearchTerm;
+        } else if (searchType === 'vendor') {
+          params.vendor_search = currentSearchTerm;
+        } else {
+          params.search = currentSearchTerm; // Default license search
+        }
+      }
       
       const licensesRes = await api.get('/licenses', { 
         params,
@@ -420,13 +431,14 @@ const Licenses = () => {
   };
 
   // Handle form submission
-  const handleSubmit = async (values, { setSubmitting, resetForm }) => {
+  const handleSubmit = async (values, { setSubmitting, resetForm, setFieldError }) => {
     try {
-      // Format dates to ISO string
+      // Format values before sending to API
       const formattedValues = {
         ...values,
-        purchase_date: new Date(values.purchase_date).toISOString(),
-        expiration_date: new Date(values.expiration_date).toISOString(),
+        seats: Number(values.seats) || 1, // Ensure seats is a number
+        purchase_date: values.purchase_date ? new Date(values.purchase_date).toISOString() : null,
+        expiration_date: values.expiration_date ? new Date(values.expiration_date).toISOString() : null,
       };
 
       if (selectedLicense) {
@@ -435,11 +447,20 @@ const Licenses = () => {
         await api.post('/licenses', formattedValues);
       }
       
+      // Refresh the data and close the dialog
       await fetchData();
-      handleCloseDialog();
       resetForm();
+      setOpenDialog(false);
+      setSelectedLicense(null);
     } catch (error) {
       console.error('Error saving license:', error);
+      setFormError(error.response?.data?.message || 'Failed to save license');
+      // Optionally set field-specific errors
+      if (error.response?.data?.errors) {
+        Object.entries(error.response.data.errors).forEach(([field, message]) => {
+          setFieldError(field, message);
+        });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -524,15 +545,27 @@ const Licenses = () => {
         </Box>
 
         {/* Search Bar */}
-        <Box sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
-          <SearchIcon sx={{ color: 'action.active', mr: 1 }} />
+        <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Search By</InputLabel>
+            <Select
+              value={searchType}
+              onChange={(e) => setSearchType(e.target.value)}
+              label="Search By"
+            >
+              <MenuItem value="license">License</MenuItem>
+              <MenuItem value="customer">Customer</MenuItem>
+              <MenuItem value="vendor">Vendor</MenuItem>
+            </Select>
+          </FormControl>
           <TextField
             variant="outlined"
-            placeholder="Search licenses..."
+            placeholder={`Search by ${searchType}...`}
             value={localSearchTerm}
             onChange={handleSearchChange}
             fullWidth
             InputProps={{
+              startAdornment: <SearchIcon sx={{ color: 'action.active', mr: 1 }} />,
               // This prevents the input from losing focus
               onBlur: (e) => e.preventDefault(),
             }}

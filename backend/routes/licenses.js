@@ -28,6 +28,8 @@ router.get(
   authenticate,
   [
     query('search').optional().isString().trim(),
+    query('customer_search').optional().isString().trim(),
+    query('vendor_search').optional().isString().trim(),
     query('vendorId').optional().isInt({ min: 1 }).toInt(),
     query('customerId').optional().isInt({ min: 1 }).toInt(),
     query('isActive').optional().isBoolean().toBoolean(),
@@ -45,7 +47,9 @@ router.get(
 
     try {
       const { 
-        search = '', 
+        search = '',
+        customer_search = '',
+        vendor_search = '',
         vendorId, 
         customerId, 
         isActive,
@@ -60,6 +64,8 @@ router.get(
 
       const { data, total } = await License.getAll({
         search,
+        customerSearch: customer_search,
+        vendorSearch: vendor_search,
         vendorId,
         customerId,
         isActive,

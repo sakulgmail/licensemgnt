@@ -4,6 +4,8 @@ class License {
   // Get all licenses with optional filters and pagination
   static async getAll({
     search = '',
+    customerSearch = '',
+    vendorSearch = '',
     vendorId,
     customerId,
     isActive,
@@ -28,12 +30,24 @@ class License {
       WHERE 1=1
     `;
 
-    // Add search condition
+    // Add search conditions
     if (search) {
       queryParams.push(`%${search}%`);
       queryText += ` AND (l.name ILIKE $${queryParams.length} 
                         OR l.license_key::text ILIKE $${queryParams.length} 
                         OR l.description ILIKE $${queryParams.length})`;
+    }
+
+    // Add customer search condition
+    if (customerSearch) {
+      queryParams.push(`%${customerSearch}%`);
+      queryText += ` AND c.name ILIKE $${queryParams.length}`;
+    }
+
+    // Add vendor search condition
+    if (vendorSearch) {
+      queryParams.push(`%${vendorSearch}%`);
+      queryText += ` AND v.name ILIKE $${queryParams.length}`;
     }
 
     // Add vendor filter
@@ -112,6 +126,7 @@ class License {
     customer_id,
     purchase_date,
     expiration_date,
+    seats = 1,
     cost,
     currency,
     is_active = true,
@@ -121,8 +136,8 @@ class License {
     const result = await pool.query(
       `INSERT INTO licenses 
        (name, description, license_key, license_type, vendor_id, customer_id,
-        purchase_date, expiration_date, cost, currency, is_active, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        purchase_date, expiration_date, seats, cost, currency, is_active, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
       [
         name,
@@ -133,6 +148,7 @@ class License {
         customer_id,
         purchase_date,
         expiration_date,
+        seats,
         cost,
         currency,
         is_active,
@@ -154,6 +170,7 @@ class License {
     customer_id,
     purchase_date,
     expiration_date,
+    seats,
     cost,
     currency,
     is_active,
@@ -169,10 +186,11 @@ class License {
            customer_id = COALESCE($7, customer_id),
            purchase_date = COALESCE($8, purchase_date),
            expiration_date = COALESCE($9, expiration_date),
-           cost = COALESCE($10, cost),
-           currency = COALESCE($11, currency),
-           is_active = COALESCE($12, is_active),
-           notes = COALESCE($13, notes),
+           seats = COALESCE($10, seats),
+           cost = COALESCE($11, cost),
+           currency = COALESCE($12, currency),
+           is_active = COALESCE($13, is_active),
+           notes = COALESCE($14, notes),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
        RETURNING *`,
@@ -186,6 +204,7 @@ class License {
         customer_id,
         purchase_date,
         expiration_date,
+        seats,
         cost,
         currency,
         is_active,
