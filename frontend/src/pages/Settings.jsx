@@ -1,4 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
+
+// Error fallback component
+function ErrorFallback({ error, resetErrorBoundary }) {
+  return (
+    <div role="alert" style={{ padding: '20px', color: 'red' }}>
+      <p>Something went wrong:</p>
+      <pre>{error.message}</pre>
+      <button onClick={resetErrorBoundary}>Try again</button>
+    </div>
+  );
+}
 import { 
   Box, 
   Button, 
@@ -27,7 +39,9 @@ import {
   InputLabel,
   FormControl,
   Alert,
-  Snackbar
+  Snackbar,
+  CircularProgress,
+  Chip
 } from '@mui/material';
 import { 
   Save as SaveIcon,
@@ -36,7 +50,8 @@ import {
   Delete as DeleteIcon,
   Email as EmailIcon,
   Person as PersonIcon,
-  Notifications as NotificationsIcon
+  Notifications as NotificationsIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
@@ -52,13 +67,12 @@ function TabPanel(props) {
       hidden={value !== index}
       id={`settings-tabpanel-${index}`}
       aria-labelledby={`settings-tab-${index}`}
+      style={{ width: '100%' }}
       {...other}
     >
-      {value === index && (
-        <Box sx={{ p: 3 }}>
-          {children}
-        </Box>
-      )}
+      <Box sx={{ p: 3, display: value === index ? 'block' : 'none' }}>
+        {children}
+      </Box>
     </div>
   );
 }
@@ -78,10 +92,13 @@ const NotificationSchema = Yup.object().shape({
     .required('Required'),
   notificationTime: Yup.string().required('Required'),
   sendToEmail: Yup.boolean(),
-  emailAddress: Yup.string().when('sendToEmail', {
-    is: true,
-    then: Yup.string().email('Invalid email').required('Email is required')
-  })
+  emailAddress: Yup.string()
+    .when('sendToEmail', (sendToEmail, schema) => {
+      return sendToEmail[0] === true 
+        ? schema.email('Invalid email').required('Email is required')
+        : schema;
+    }),
+  includeInactive: Yup.boolean()
 });
 
 // Validation Schema for User Profile
@@ -106,8 +123,9 @@ const ProfileSchema = Yup.object().shape({
   })
 });
 
-const Settings = () => {
+function Settings() {
   const [tabValue, setTabValue] = useState(0);
+  const [error, setError] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({
     daysBeforeExpiration: 30,
     notificationTime: '09:00',
@@ -134,44 +152,47 @@ const Settings = () => {
     severity: 'success'
   });
 
-  // Fetch settings and users
-  const fetchData = async () => {
+  // Fetch settings and users with error boundary
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      // In a real app, you would fetch these from your API
-      // const [settingsRes, usersRes] = await Promise.all([
-      //   api.get('/settings/notifications'),
-      //   api.get('/users')
-      // ]);
+      setError(null);
       
-      // Mock data for now
-      setTimeout(() => {
-        setNotificationSettings({
-          daysBeforeExpiration: 30,
-          notificationTime: '09:00',
-          sendToEmail: true,
-          emailAddress: 'admin@example.com',
-          includeInactive: false
-        });
-        
-        setProfile({
-          name: 'Admin User',
-          email: 'admin@example.com',
-          currentPassword: '',
-          newPassword: '',
-          confirmPassword: ''
-        });
-        
-        setUsers([
-          { id: 1, name: 'Admin User', email: 'admin@example.com', role: 'admin', active: true },
-          { id: 2, name: 'John Doe', email: 'john@example.com', role: 'user', active: true },
-          { id: 3, name: 'Jane Smith', email: 'jane@example.com', role: 'user', active: false }
-        ]);
-        
-        setLoading(false);
-      }, 500);
-    } catch (error) {
-      console.error('Error fetching settings:', error);
+      // Fetch notification settings from the backend
+      const [settingsRes, usersRes] = await Promise.all([
+        api.get('/settings/notifications').catch(() => ({
+          data: {
+            daysBeforeExpiration: 30,
+            notificationTime: '09:00',
+            sendToEmail: true,
+            emailAddress: 'admin@example.com',
+            includeInactive: false
+          }
+        })),
+        // api.get('/users') // Uncomment when user management is implemented
+      ]);
+      
+      // Update notification settings with data from the backend
+      setNotificationSettings(settingsRes.data);
+      
+      setProfile({
+        name: 'Admin User',
+        email: 'admin@example.com',
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+      
+      setUsers([
+        { id: 1, name: 'Admin User', email: 'admin@example.com', role: 'admin', active: true },
+        { id: 2, name: 'John Doe', email: 'john@example.com', role: 'user', active: true },
+        { id: 3, name: 'Jane Smith', email: 'jane@example.com', role: 'user', active: false }
+      ]);
+      
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+      setError(err);
       setSnackbar({
         open: true,
         message: 'Failed to load settings',
@@ -179,27 +200,50 @@ const Settings = () => {
       });
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    let mounted = true;
+    
+    const loadData = async () => {
+      try {
+        await fetchData();
+      } catch (error) {
+        console.error('Error in Settings component:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to load settings. Please try again.',
+          severity: 'error'
+        });
+      }
+    };
+    
+    if (mounted) {
+      loadData();
+    }
+    
+    return () => {
+      mounted = false;
+    };
+  }, [fetchData]);
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
 
-  const handleNotificationSubmit = async (values, { setSubmitting }) => {
+  const handleNotificationSubmit = async (values, { setSubmitting, resetForm }) => {
     try {
-      // In a real app, you would save these to your API
-      // await api.put('/settings/notifications', values);
+      // Save settings to the backend API
+      await api.put('/settings/notifications', values);
       
+      // Update local state with the saved values
       setNotificationSettings(values);
       setSnackbar({
         open: true,
         message: 'Notification settings saved successfully',
         severity: 'success'
       });
+      resetForm({ values }); // Reset form with new values
     } catch (error) {
       console.error('Error saving notification settings:', error);
       setSnackbar({
@@ -316,11 +360,7 @@ const Settings = () => {
     }
   };
 
-  const handleSnackbarClose = () => {
-    setSnackbar({ ...snackbar, open: false });
-  };
-
-  // Generate time options for notification time select
+  // Generate time options for notification time select (every 30 minutes)
   const timeOptions = [];
   for (let hour = 0; hour < 24; hour++) {
     for (let minute = 0; minute < 60; minute += 30) {
@@ -329,8 +369,52 @@ const Settings = () => {
     }
   }
 
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
+  if (error) {
+    return (
+      <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="60vh" p={3}>
+        <Typography variant="h6" color="error" gutterBottom>
+          Error loading settings
+        </Typography>
+        <Typography color="textSecondary" paragraph>
+          {error.message || 'An unknown error occurred'}
+        </Typography>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          onClick={() => window.location.reload()}
+          startIcon={<RefreshIcon />}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress />
+        <Box ml={2}>
+          <Typography>Loading settings...</Typography>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
-    <Container maxWidth="lg">
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onReset={() => {
+        // Reset the state or perform any other reset logic
+        setLoading(true);
+        fetchData();
+      }}
+    >
+      <Container maxWidth="lg">
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Settings
@@ -556,15 +640,40 @@ const Settings = () => {
                     </Grid>
                     
                     <Grid item xs={12}>
-                      <Button
-                        type="submit"
-                        variant="contained"
-                        color="primary"
-                        startIcon={<SaveIcon />}
-                        disabled={isSubmitting || loading}
-                      >
-                        {isSubmitting ? 'Saving...' : 'Save Notification Settings'}
-                      </Button>
+                      <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          color="primary"
+                          startIcon={isSubmitting ? <CircularProgress size={20} /> : <SaveIcon />}
+                          disabled={isSubmitting || loading}
+                        >
+                          {isSubmitting ? 'Saving...' : 'Save Settings'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outlined"
+                          color="secondary"
+                          onClick={async () => {
+                            try {
+                              setSnackbar({ open: true, message: 'Sending test email...', severity: 'info' });
+                              await api.get('/settings/test-email');
+                              setSnackbar({ open: true, message: 'Test email sent successfully!', severity: 'success' });
+                            } catch (error) {
+                              console.error('Error sending test email:', error);
+                              setSnackbar({ 
+                                open: true, 
+                                message: error.response?.data?.error || 'Failed to send test email', 
+                                severity: 'error' 
+                              });
+                            }
+                          }}
+                          startIcon={<EmailIcon />}
+                          disabled={!values.sendToEmail || !values.emailAddress}
+                        >
+                          Send Test Email
+                        </Button>
+                      </Box>
                     </Grid>
                   </Grid>
                 </Form>
@@ -702,9 +811,10 @@ const Settings = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+      </Container>
+    </ErrorBoundary>
   );
-};
+}
 
 // User Dialog Component
 const UserDialog = ({ open, onClose, onSave, user, isEditing }) => {

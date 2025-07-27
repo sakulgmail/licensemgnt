@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Box, 
   Button, 
@@ -25,7 +25,9 @@ import {
   FormControl,
   InputLabel,
   Select,
-  Chip
+  Chip,
+  Autocomplete,
+  CircularProgress
 } from '@mui/material';
 import { 
   Add as AddIcon, 
@@ -33,7 +35,8 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon
+  Cancel as CancelIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import { Formik, Form, Field, useField } from 'formik';
 import * as Yup from 'yup';
@@ -42,34 +45,110 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import api from '../services/api';
 
-// Custom form field for Material-UI Select
-const FormikSelect = ({ name, label, options, ...props }) => {
-  const [field, meta] = useField(name);
+// Custom Autocomplete field with Formik integration and async search
+const FormikAutocomplete = ({ 
+  name, 
+  label, 
+  fetchOptions,  // Function to fetch options based on search term
+  ...props 
+}) => {
+  const [field, meta, helpers] = useField(name);
+  const [inputValue, setInputValue] = useState('');
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
   const errorText = meta.error && meta.touched ? meta.error : '';
-  
+
+  // Debounce search
+  const debounce = (func, delay) => {
+    let timeoutId;
+    return function(...args) {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        func.apply(this, args);
+      }, delay);
+    };
+  };
+
+  // Fetch options when input changes
+  const fetchOptionsDelayed = useCallback(
+    debounce(async (searchValue) => {
+      if (!searchValue) {
+        setOptions([]);
+        return;
+      }
+      try {
+        setLoading(true);
+        const results = await fetchOptions(searchValue);
+        setOptions(results);
+      } catch (error) {
+        console.error('Error fetching options:', error);
+      } finally {
+        setLoading(false);
+      }
+    }, 300),
+    [fetchOptions]
+  );
+
+  // Handle input change
+  const handleInputChange = (event, value, reason) => {
+    setInputValue(value);
+    if (reason === 'input') {
+      fetchOptionsDelayed(value);
+    }
+  };
+
+  // Handle open/close
+  const handleOpen = () => {
+    setOpen(true);
+    if (inputValue) {
+      fetchOptionsDelayed(inputValue);
+    }
+  };
+
   return (
-    <FormControl 
-      fullWidth 
-      margin="normal" 
-      error={!!errorText}
-    >
-      <InputLabel>{label}</InputLabel>
-      <Select
-        {...field}
-        label={label}
+    <FormControl fullWidth margin="normal" error={!!errorText}>
+      <Autocomplete
+        options={options}
+        loading={loading}
+        open={open}
+        onOpen={handleOpen}
+        onClose={() => setOpen(false)}
+        inputValue={inputValue}
+        onInputChange={handleInputChange}
+        getOptionLabel={(option) => option.label || ''}
+        isOptionEqualToValue={(option, value) => option.value === value.value}
+        value={options.find(option => option.value === field.value) || null}
+        onChange={(_, value) => {
+          helpers.setValue(value ? value.value : '');
+          helpers.setTouched(true);
+        }}
+        onBlur={() => helpers.setTouched(true)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label={label}
+            error={!!errorText}
+            helperText={errorText}
+            InputProps={{
+              ...params.InputProps,
+              endAdornment: (
+                <>
+                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                  {params.InputProps.endAdornment}
+                </>
+              ),
+            }}
+          />
+        )}
+        ListboxProps={{
+          style: {
+            maxHeight: 300,
+          },
+        }}
+        noOptionsText={inputValue ? 'No results found' : 'Type to search...'}
         {...props}
-      >
-        {options.map((option) => (
-          <MenuItem key={option.value} value={option.value}>
-            {option.label}
-          </MenuItem>
-        ))}
-      </Select>
-      {errorText && (
-        <Typography color="error" variant="caption">
-          {errorText}
-        </Typography>
-      )}
+      />
     </FormControl>
   );
 };
@@ -108,6 +187,7 @@ const Licenses = () => {
   const [formError, setFormError] = useState(null);
   const [orderBy, setOrderBy] = useState('name');
   const [order, setOrder] = useState('asc');
+  const [viewMode, setViewMode] = useState(false);
 
   // Debounce function
   const debounce = (func, delay) => {
@@ -120,20 +200,34 @@ const Licenses = () => {
     };
   };
 
-  // Debounced search function
-  const debouncedSearch = useCallback(
-    debounce((searchValue) => {
-      setSearchTerm(searchValue);
-      setPage(0); // Reset to first page when searching
-    }, 300),
-    [] // This effect runs once on mount
-  );
+  // Use refs to track the latest search value and controller
+  const searchRef = useRef('');
+  const controllerRef = useRef(null);
+  const [localSearchTerm, setLocalSearchTerm] = useState('');
+  
+  // Memoize the search function
+  const performSearch = useCallback(debounce((value) => {
+    if (searchTerm !== value) {
+      setSearchTerm(value);
+      setPage(0);
+    }
+  }, 300), [searchTerm]);
 
   // Handle search input change
   const handleSearchChange = (event) => {
     const { value } = event.target;
-    debouncedSearch(value);
+    // Update local state immediately for responsive typing
+    setLocalSearchTerm(value);
+    // Update the ref
+    searchRef.current = value;
+    // Trigger debounced search
+    performSearch(value);
   };
+  
+  // Sync local search term with the actual search term when it changes
+  useEffect(() => {
+    setLocalSearchTerm(searchTerm);
+  }, [searchTerm]);
 
   // Handle sorting
   const handleRequestSort = (property) => {
@@ -166,146 +260,158 @@ const Licenses = () => {
     });
   };
 
-  // Fetch data with simplified requests
-  const fetchData = async () => {
+  // Function to fetch customers with search
+  const fetchCustomers = async (searchTerm = '') => {
     try {
-      setLoading(true);
+      const response = await api.get('/customers', { 
+        params: { 
+          search: searchTerm,
+          limit: 20, // Fetch a reasonable number of results
+          page: 1
+        } 
+      });
+      
+      // Handle different response formats
+      const customersData = Array.isArray(response.data) ? 
+        response.data : 
+        (response.data?.data || []);
+      
+      return customersData.map(customer => ({
+        value: customer.id,
+        label: customer.name || 'Unnamed Customer'
+      }));
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      return [];
+    }
+  };
+
+  // Function to fetch vendors with search
+  const fetchVendors = async (searchTerm = '') => {
+    try {
+      const response = await api.get('/vendors', { 
+        params: { 
+          search: searchTerm,
+          limit: 20, // Fetch a reasonable number of results
+          page: 1
+        } 
+      });
+      
+      // Handle different response formats
+      const vendorsData = Array.isArray(response.data) ? 
+        response.data : 
+        (response.data?.data || []);
+      
+      return vendorsData.map(vendor => ({
+        value: vendor.id,
+        label: vendor.name || 'Unnamed Vendor'
+      }));
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+      return [];
+    }
+  };
+
+
+
+  // Fetch data with optimized re-renders
+  const fetchData = useCallback(async () => {
+    const currentSearchTerm = searchRef.current;
+    
+    // Cancel any pending request
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+    }
+    
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    
+    try {
+      // Only show loading if we don't have any data yet or if we're doing a new search
+      if (licenses.length === 0 || currentSearchTerm !== searchTerm) {
+        setLoading(true);
+      }
       setFormError(null);
       
-      // Check if user is authenticated
       const token = localStorage.getItem('token');
       if (!token) {
         throw new Error('No authentication token found. Please log in again.');
       }
       
-      console.log('Fetching data with token:', token);
-      
-      // Set default headers for all requests
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       
-      // 1. First, try to fetch customers with minimal parameters
-      console.log('Trying to fetch customers with minimal parameters...');
-      let customersRes;
-      try {
-        customersRes = await api.get('/customers', { params: { limit: 10 } });
-        console.log('Customers response (minimal params):', customersRes);
-      } catch (error) {
-        console.error('Error fetching customers (minimal params):', {
-          message: error.message,
-          response: error.response?.data,
-          status: error.response?.status,
-          config: error.config
-        });
-        throw error;
-      }
+      const params = { 
+        limit: rowsPerPage,
+        page: page + 1,
+        ...(currentSearchTerm && { search: currentSearchTerm })
+      };
       
-      // 2. Try to fetch vendors with minimal parameters
-      console.log('Trying to fetch vendors with minimal parameters...');
-      let vendorsRes;
-      try {
-        vendorsRes = await api.get('/vendors', { params: { limit: 10 } });
-        console.log('Vendors response (minimal params):', vendorsRes);
-      } catch (error) {
-        console.error('Error fetching vendors (minimal params):', {
-          message: error.message,
-          response: error.response?.data,
-          status: error.response?.status,
-          config: error.config
-        });
-        throw error;
-      }
+      const licensesRes = await api.get('/licenses', { 
+        params,
+        signal: controller.signal
+      });
       
-      // 3. Try to fetch licenses with minimal parameters
-      console.log('Trying to fetch licenses with minimal parameters...');
-      let licensesRes;
-      try {
-        licensesRes = await api.get('/licenses', { 
-          params: { 
-            limit: rowsPerPage,
-            page: page + 1
-          } 
-        });
-        console.log('Licenses response (minimal params):', licensesRes);
-      } catch (error) {
-        console.error('Error fetching licenses (minimal params):', {
-          message: error.message,
-          response: error.response?.data,
-          status: error.response?.status,
-          config: error.config
-        });
-        // Don't throw here, as we might still want to show the form even if licenses fail
-      }
-      
-      // Process and set data
-      if (licensesRes && licensesRes.data) {
-        // Handle different possible response structures
+      if (!controller.signal.aborted) {
         const licensesData = Array.isArray(licensesRes.data) ? 
           licensesRes.data : 
-          (licensesRes.data.data || []);
-        setLicenses(licensesData);
-      } else {
-        setLicenses([]); // Ensure licenses is always an array
-      }
-      
-      // Map customers to the expected format
-      let formattedCustomers = [];
-      if (customersRes && customersRes.data) {
-        // Handle different possible response structures
-        const customersData = Array.isArray(customersRes.data) ? 
-          customersRes.data : 
-          (customersRes.data.data || []);
+          (licensesRes.data?.data || []);
           
-        formattedCustomers = customersData.map(customer => ({
-          id: customer.id,
-          name: customer.name || 'Unnamed Customer'
-        }));
+        // Only update if the search term hasn't changed since we started the request
+        if (!controller.signal.aborted && searchRef.current === currentSearchTerm) {
+          setLicenses(licensesData);
+        }
       }
-      console.log('Formatted Customers:', formattedCustomers);
-      setCustomers(formattedCustomers);
-      
-      // Map vendors to the expected format
-      let formattedVendors = [];
-      if (vendorsRes && vendorsRes.data) {
-        // Handle different possible response structures
-        const vendorsData = Array.isArray(vendorsRes.data) ? 
-          vendorsRes.data : 
-          (vendorsRes.data.data || []);
-          
-        formattedVendors = vendorsData.map(vendor => ({
-          id: vendor.id,
-          name: vendor.name || 'Unnamed Vendor'
-        }));
-      }
-      console.log('Formatted Vendors:', formattedVendors);
-      setVendors(formattedVendors);
-      
     } catch (error) {
-      console.error('Error in fetchData:', error);
-      // Show error to user
-      const errorMessage = error.response?.data?.error || 
-                         error.response?.data?.message || 
-                         error.message || 
-                         'Failed to load data. Please try again.';
-      setFormError(errorMessage);
-      
-      // If unauthorized, redirect to login
-      if (error.response?.status === 401) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
+      if (error.name !== 'CanceledError' && error.name !== 'AbortError') {
+        console.error('Error:', error);
+        setFormError(error.response?.data?.message || 'Failed to load data');
+        setLicenses([]);
+        
+        if (error.response?.status === 401) {
+          localStorage.removeItem('token');
+          window.location.href = '/login';
+        }
       }
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
-  };
-
+  }, [page, rowsPerPage, searchTerm]);
+  
+  // Initial data load and when dependencies change
   useEffect(() => {
     fetchData();
-  }, [page, rowsPerPage, searchTerm]);
+    
+    return () => {
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+      }
+    };
+  }, [fetchData]);
+
+  // Handle view click
+  const handleViewClick = (license) => {
+    // Set the selected license with all its data
+    setSelectedLicense({
+      ...license,
+      // Make sure we have the correct field names that match the form
+      customer_id: license.customer_id,
+      vendor_id: license.vendor_id,
+      customer_name: license.customer_name || 'N/A',
+      vendor_name: license.vendor_name || 'N/A',
+      purchase_date: license.purchase_date ? new Date(license.purchase_date) : null,
+      expiration_date: license.expiration_date ? new Date(license.expiration_date) : null,
+    });
+    setOpenDialog(true);
+    setViewMode(true);
+  };
 
   // Handle dialog open/close
   const handleOpenDialog = (license = null) => {
     setSelectedLicense(license);
     setOpenDialog(true);
+    setViewMode(false);
   };
 
   const handleCloseDialog = () => {
@@ -377,14 +483,24 @@ const Licenses = () => {
     return new Date(dateString).toLocaleDateString();
   };
 
-  // Initial values for the form
-  const initialValues = selectedLicense || {
+  // Initial form values
+  const initialValues = selectedLicense ? {
+    name: selectedLicense.name || '',
+    license_key: selectedLicense.license_key || '',
+    customer_id: selectedLicense.customer_id || '',
+    vendor_id: selectedLicense.vendor_id || '',
+    purchase_date: selectedLicense.purchase_date ? new Date(selectedLicense.purchase_date) : null,
+    expiration_date: selectedLicense.expiration_date ? new Date(selectedLicense.expiration_date) : null,
+    seats: selectedLicense.seats || 1,
+    cost: selectedLicense.cost || 0,
+    notes: selectedLicense.notes || ''
+  } : {
     name: '',
+    license_key: '',
     customer_id: '',
     vendor_id: '',
-    license_key: '',
-    purchase_date: new Date(),
-    expiration_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
+    purchase_date: null,
+    expiration_date: null,
     seats: 1,
     cost: 0,
     notes: ''
@@ -413,7 +529,7 @@ const Licenses = () => {
           <TextField
             variant="outlined"
             placeholder="Search licenses..."
-            defaultValue={searchTerm}
+            value={localSearchTerm}
             onChange={handleSearchChange}
             fullWidth
             InputProps={{
@@ -551,6 +667,11 @@ const Licenses = () => {
                           )}
                         </TableCell>
                         <TableCell align="right">
+                          <Tooltip title="View">
+                            <IconButton onClick={() => handleViewClick(license)} color="primary">
+                              <VisibilityIcon />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Edit">
                             <IconButton onClick={() => handleOpenDialog(license)}>
                               <EditIcon />
@@ -583,12 +704,12 @@ const Licenses = () => {
         {/* Add/Edit License Dialog */}
         <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
           <DialogTitle>
-            {selectedLicense ? 'Edit License' : 'Add New License'}
+            {viewMode ? 'View License' : selectedLicense ? 'Edit License' : 'Add New License'}
           </DialogTitle>
           <Formik
             initialValues={initialValues}
-            validationSchema={LicenseSchema}
-            onSubmit={handleSubmit}
+            validationSchema={viewMode ? null : LicenseSchema}
+            onSubmit={viewMode ? (e) => { e.preventDefault(); } : handleSubmit}
             enableReinitialize
           >
             {({ 
@@ -609,8 +730,13 @@ const Licenses = () => {
                       label="License Name"
                       fullWidth
                       margin="normal"
-                      error={touched.name && Boolean(errors.name)}
-                      helperText={touched.name && errors.name}
+                      error={!viewMode && touched.name && Boolean(errors.name)}
+                      helperText={!viewMode && touched.name && errors.name}
+                      InputProps={{
+                        readOnly: viewMode,
+                        style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                      }}
+                      variant={viewMode ? 'standard' : 'outlined'}
                     />
 
                     <Field
@@ -619,43 +745,76 @@ const Licenses = () => {
                       label="License Key"
                       fullWidth
                       margin="normal"
-                      error={touched.license_key && Boolean(errors.license_key)}
-                      helperText={touched.license_key && errors.license_key}
+                      error={!viewMode && touched.license_key && Boolean(errors.license_key)}
+                      helperText={!viewMode && touched.license_key && errors.license_key}
+                      InputProps={{
+                        readOnly: viewMode,
+                        style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                      }}
+                      variant={viewMode ? 'standard' : 'outlined'}
                     />
 
-                    <FormikSelect
-                      name="customer_id"
-                      label="Customer"
-                      options={customers.map(customer => ({
-                        value: customer.id,
-                        label: customer.name
-                      }))}
-                      error={touched.customer_id && Boolean(errors.customer_id)}
-                      helperText={touched.customer_id && errors.customer_id}
-                    />
+                    {viewMode ? (
+                      <Field
+                        as={TextField}
+                        name="customer_display"
+                        label="Customer"
+                        fullWidth
+                        margin="normal"
+                        InputProps={{
+                          readOnly: true,
+                          style: { color: 'rgba(0, 0, 0, 0.87)' }
+                        }}
+                        variant="standard"
+                        value={selectedLicense?.customer_name || 'N/A'}
+                      />
+                    ) : (
+                      <FormikAutocomplete
+                        name="customer_id"
+                        label="Customer"
+                        fetchOptions={fetchCustomers}
+                      />
+                    )}
 
-                    <FormikSelect
-                      name="vendor_id"
-                      label="Vendor"
-                      options={vendors.map(vendor => ({
-                        value: vendor.id,
-                        label: vendor.name
-                      }))}
-                      error={touched.vendor_id && Boolean(errors.vendor_id)}
-                      helperText={touched.vendor_id && errors.vendor_id}
-                    />
+                    {viewMode ? (
+                      <Field
+                        as={TextField}
+                        name="vendor_display"
+                        label="Vendor"
+                        fullWidth
+                        margin="normal"
+                        InputProps={{
+                          readOnly: true,
+                          style: { color: 'rgba(0, 0, 0, 0.87)' }
+                        }}
+                        variant="standard"
+                        value={selectedLicense?.vendor_name || 'N/A'}
+                      />
+                    ) : (
+                      <FormikAutocomplete
+                        name="vendor_id"
+                        label="Vendor"
+                        fetchOptions={fetchVendors}
+                      />
+                    )}
 
                     <DatePicker
                       label="Purchase Date"
                       value={values.purchase_date}
                       onChange={(date) => setFieldValue('purchase_date', date)}
+                      readOnly={viewMode}
                       renderInput={(params) => (
                         <TextField
                           {...params}
                           fullWidth
                           margin="normal"
-                          error={touched.purchase_date && Boolean(errors.purchase_date)}
-                          helperText={(touched.purchase_date && errors.purchase_date) || ' '}
+                          error={!viewMode && touched.purchase_date && Boolean(errors.purchase_date)}
+                          helperText={!viewMode && (touched.purchase_date && errors.purchase_date) || ' '}
+                          InputProps={{
+                            readOnly: viewMode,
+                            style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                          }}
+                          variant={viewMode ? 'standard' : 'outlined'}
                         />
                       )}
                     />
@@ -665,13 +824,19 @@ const Licenses = () => {
                       value={values.expiration_date}
                       minDate={values.purchase_date}
                       onChange={(date) => setFieldValue('expiration_date', date)}
+                      readOnly={viewMode}
                       renderInput={(params) => (
                         <TextField
                           {...params}
                           fullWidth
                           margin="normal"
-                          error={touched.expiration_date && Boolean(errors.expiration_date)}
-                          helperText={(touched.expiration_date && errors.expiration_date) || ' '}
+                          error={!viewMode && touched.expiration_date && Boolean(errors.expiration_date)}
+                          helperText={!viewMode && (touched.expiration_date && errors.expiration_date) || ' '}
+                          InputProps={{
+                            readOnly: viewMode,
+                            style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                          }}
+                          variant={viewMode ? 'standard' : 'outlined'}
                         />
                       )}
                     />
@@ -683,9 +848,17 @@ const Licenses = () => {
                       type="number"
                       fullWidth
                       margin="normal"
-                      inputProps={{ min: 1 }}
-                      error={touched.seats && Boolean(errors.seats)}
-                      helperText={touched.seats && errors.seats}
+                      inputProps={{ 
+                        min: 1,
+                        readOnly: viewMode
+                      }}
+                      error={!viewMode && touched.seats && Boolean(errors.seats)}
+                      helperText={!viewMode && touched.seats && errors.seats}
+                      InputProps={{
+                        readOnly: viewMode,
+                        style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                      }}
+                      variant={viewMode ? 'standard' : 'outlined'}
                     />
 
                     <Field
@@ -701,10 +874,17 @@ const Licenses = () => {
                             $
                           </Typography>
                         ),
+                        readOnly: viewMode,
+                        style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
                       }}
-                      inputProps={{ min: 0, step: 0.01 }}
-                      error={touched.cost && Boolean(errors.cost)}
-                      helperText={touched.cost && errors.cost}
+                      inputProps={{ 
+                        min: 0, 
+                        step: 0.01,
+                        readOnly: viewMode
+                      }}
+                      error={!viewMode && touched.cost && Boolean(errors.cost)}
+                      helperText={!viewMode && touched.cost && errors.cost}
+                      variant={viewMode ? 'standard' : 'outlined'}
                     />
                   </Box>
 
@@ -716,13 +896,20 @@ const Licenses = () => {
                     multiline
                     rows={4}
                     margin="normal"
+                    InputProps={{
+                      readOnly: viewMode,
+                      style: viewMode ? { color: 'rgba(0, 0, 0, 0.87)' } : {}
+                    }}
+                    variant={viewMode ? 'standard' : 'outlined'}
                   />
                 </DialogContent>
                 <DialogActions>
-                  <Button onClick={handleCloseDialog}>Cancel</Button>
-                  <Button type="submit" color="primary" variant="contained" disabled={isSubmitting}>
-                    {isSubmitting ? 'Saving...' : 'Save'}
-                  </Button>
+                  <Button onClick={handleCloseDialog}>{viewMode ? 'Close' : 'Cancel'}</Button>
+                  {!viewMode && (
+                    <Button type="submit" color="primary" variant="contained" disabled={isSubmitting}>
+                      {isSubmitting ? 'Saving...' : 'Save'}
+                    </Button>
+                  )}
                 </DialogActions>
               </Form>
             )}

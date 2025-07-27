@@ -321,29 +321,30 @@ const Dashboard = () => {
                           }}
                           secondary={
                             <>
-                              <Box component="span" display="block">
+                              <Box component="span" sx={{ display: 'block' }}>
                                 {customerName} • {vendorName}
                               </Box>
-                              <Box component="span" display="block" color="text.secondary">
+                              <Box component="span" sx={{ display: 'block', color: 'text.secondary' }}>
                                 Expires: {formatDate(license.expiration_date)}
                                 {isExpiredFlag ? (
                                   <Chip 
                                     label="Expired" 
                                     size="small" 
                                     color="error" 
-                                    sx={{ ml: 1 }} 
+                                    sx={{ ml: 1, display: 'inline-flex', verticalAlign: 'middle' }} 
                                   />
                                 ) : isExpiringSoonFlag ? (
                                   <Chip 
                                     label="Expiring Soon" 
                                     size="small" 
                                     color="warning" 
-                                    sx={{ ml: 1 }} 
+                                    sx={{ ml: 1, display: 'inline-flex', verticalAlign: 'middle' }} 
                                   />
                                 ) : null}
                               </Box>
                             </>
                           }
+                          secondaryTypographyProps={{ component: 'div' }}
                         />
                       </ListItem>
                     );

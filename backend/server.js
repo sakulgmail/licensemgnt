@@ -10,12 +10,13 @@ const customerRoutes = require('./routes/customers');
 const vendorRoutes = require('./routes/vendors');
 const licenseRoutes = require('./routes/licenses');
 const dashboardRoutes = require('./routes/dashboard');
+const settingsRoutes = require('./routes/settings');
 
 // Import database configuration
 const { pool } = require('./config/db');
 
-// Import jobs
-const notificationJob = require('./jobs/notificationJob');
+// Import scheduler
+const { initScheduler } = require('./services/scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -77,6 +78,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/licenses', licenseRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -125,13 +127,18 @@ app.use((err, req, res, next) => {
 
 // Start the server
 const server = app.listen(PORT, () => {
-  logger.info(`Server is running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+  console.log(`Server is running on port ${PORT}`);
+  logger.info(`Server started on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   
-  // Start the notification job in non-test environment
+  // Initialize the scheduler in non-test environment
   if (process.env.NODE_ENV !== 'test') {
-    notificationJob.start();
-    logger.info('Notification job started');
+    initScheduler().then(tasks => {
+      logger.info(`Initialized ${tasks.length} scheduled notification tasks`);
+    }).catch(error => {
+      logger.error('Failed to initialize scheduler:', error);
+    });
   }
+  logger.info('Notification job started');
 });
 
 // Handle unhandled promise rejections
