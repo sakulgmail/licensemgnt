@@ -50,18 +50,16 @@ try {
 }
 
 /**
- * Send license expiration notification
- * @param {Object} license - License details
+ * Send license expiration notifications in a single email
+ * @param {Array} licenses - Array of license details with days until expiry
  * @param {string} recipient - Email address of the recipient
- * @param {number} daysUntilExpiry - Number of days until license expires
  * @param {string} [userEmail] - Optional user email to include in the notification
  */
-async function sendLicenseExpirationEmail(license, recipient, daysUntilExpiry, userEmail) {
+async function sendLicenseExpirationEmail(licenses, recipient, userEmail) {
   try {
-    logger.info('Preparing to send email:', {
+    logger.info('Preparing to send email with multiple licenses:', {
       recipient,
-      licenseName: license?.name,
-      daysUntilExpiry,
+      licenseCount: licenses.length,
       userEmail,
       timestamp: new Date().toISOString()
     });
@@ -73,25 +71,64 @@ async function sendLicenseExpirationEmail(license, recipient, daysUntilExpiry, u
     if (!recipient) {
       throw new Error('No recipient email address provided');
     }
+
+    // Sort licenses by days until expiry (ascending)
+    const sortedLicenses = [...licenses].sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+    const expiringSoonest = sortedLicenses[0];
     
-    const { name, expiration_date, vendor_name, customer_name } = license;
-    const expiryDate = new Date(expiration_date).toLocaleDateString();
+    // Calculate total number of licenses expiring
+    const expiringCount = sortedLicenses.length;
+    const hasMultiple = expiringCount > 1;
     
-    let subject = `[Action Required] ${name} ${vendor_name ? `(${vendor_name}) ` : ''}expires in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}`;
+    // Create subject line with the soonest expiring license
+    const { name, vendor_name } = expiringSoonest.license;
+    const subject = hasMultiple 
+      ? `[Action Required] ${expiringCount} licenses expiring soon (${expiringSoonest.daysUntilExpiry} days)`
+      : `[Action Required] ${name} ${vendor_name ? `(${vendor_name}) ` : ''}expires in ${expiringSoonest.daysUntilExpiry} day${expiringSoonest.daysUntilExpiry !== 1 ? 's' : ''}`;
     
-    // Create email content
+    // Create email content with table of expiring licenses
     let html = `
       <h2>License Expiration Notice</h2>
-      <p>This is a notification that the following license is expiring soon:</p>
+      <p>This is a notification that ${hasMultiple ? `you have ${expiringCount} licenses expiring soon` : 'a license is expiring soon'}:</p>
       
-      <div style="margin: 20px 0; padding: 15px; border-left: 4px solid #ff9800; background-color: #fff8e1;">
-        <h3 style="margin-top: 0;">${name}</h3>
-        <p><strong>Vendor:</strong> ${vendor_name || 'N/A'}</p>
-        <p><strong>Customer:</strong> ${customer_name || 'N/A'}</p>
-        <p><strong>Expiration Date:</strong> ${expiryDate}</p>
-        <p><strong>Days Until Expiry:</strong> ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}</p>
-      </div>
-      <p>Please take appropriate action to renew or cancel this license.</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif;">
+        <thead>
+          <tr style="background-color: #f5f5f5;">
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">License</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Customer</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Vendor</th>
+            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">Expiration</th>
+            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">Days Left</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sortedLicenses.map(({ license, daysUntilExpiry }) => {
+            const expiryDate = new Date(license.expiration_date).toLocaleDateString();
+            const isExpired = daysUntilExpiry < 0;
+            const rowStyle = isExpired 
+              ? 'background-color: #ffebee; color: #c62828;' 
+              : daysUntilExpiry <= 7 
+                ? 'background-color: #fff8e1;' 
+                : '';
+                
+            return `
+              <tr style="${rowStyle}">
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                  <strong>${license.name}</strong><br>
+                  <small style="color: #666;">${license.license_key || 'No key'}</small>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${license.customer_name || 'N/A'}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${license.vendor_name || 'N/A'}</td>
+                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee;">${expiryDate}</td>
+                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee; font-weight: bold; color: ${isExpired ? '#c62828' : daysUntilExpiry <= 7 ? '#e65100' : '#2e7d32'}">
+                  ${isExpired ? `Expired ${-daysUntilExpiry} day${-daysUntilExpiry !== 1 ? 's' : ''} ago` : `${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}`}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      
+      <p>Please take appropriate action to renew or cancel these licenses.</p>
       <p>This is an automated message. Please do not reply to this email.</p>
       ${userEmail ? '<p>--<br>License Management System</p>' : ''}
     `;
@@ -99,22 +136,28 @@ async function sendLicenseExpirationEmail(license, recipient, daysUntilExpiry, u
     const mailOptions = {
       from: process.env.EMAIL_FROM || 'noreply@itpattana.com',
       to: recipient,
-      subject,
-      html
+      subject: subject,
+      html: html,
+      replyTo: userEmail || process.env.REPLY_TO_EMAIL,
+      headers: {
+        'X-Auto-Response-Suppress': 'OOF, AutoReply',
+        'Precedence': 'bulk'
+      }
     };
 
-    logger.info('Sending email with options:', {
-      from: mailOptions.from,
-      to: mailOptions.to,
-      subject: mailOptions.subject
-    });
-
-    const info = await transporter.sendMail(mailOptions);
-    logger.info('Email sent successfully:', {
-      messageId: info.messageId,
-      response: info.response,
-      envelope: info.envelope
-    });
+    // Send email
+    await transporter.sendMail(mailOptions);
+    
+    // Mark all licenses as notified
+    for (const { license } of licenses) {
+      if (license.id) {
+        try {
+          await markLicenseAsNotified(license.id);
+        } catch (error) {
+          logger.error(`Error marking license ${license.id} as notified:`, error);
+        }
+      }
+    }
     
     return true;
 } catch (error) {
@@ -203,9 +246,16 @@ async function processLicenseExpirations(daysAhead, includeInactive = false, use
     
     // Get expiring licenses
     const expiringLicenses = await getExpiringLicenses(daysAhead, includeInactive);
-    let notificationCount = 0;
     
-    // Process each license
+    if (expiringLicenses.length === 0) {
+      logger.info('No expiring licenses found');
+      return { success: true, count: 0 };
+    }
+    
+    // Group licenses by recipient
+    const licensesByRecipient = new Map();
+    
+    // Process each license to group by recipient
     for (const license of expiringLicenses) {
       try {
         // Default values
@@ -262,24 +312,49 @@ async function processLicenseExpirations(daysAhead, includeInactive = false, use
         const timeDiff = expiryDate.getTime() - today.getTime();
         const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
         
-        // Send notification email
-        const emailSent = await sendLicenseExpirationEmail(
-          license,  // Pass the license object as first parameter
-          recipient,  // Recipient email
-          daysUntilExpiry,  // Days until expiration
-          userEmail  // User email for reply-to
-        );
-        
-        if (emailSent) {
-          notificationCount++;
-          logger.info(`Notification sent for license ${license.id} to ${recipient}`);
+        // Add to recipient's license list
+        if (!licensesByRecipient.has(recipient)) {
+          licensesByRecipient.set(recipient, {
+            email: recipient,
+            userEmail,
+            licenses: []
+          });
         }
+        
+        licensesByRecipient.get(recipient).licenses.push({
+          license,
+          daysUntilExpiry
+        });
+        
       } catch (error) {
         logger.error(`Error processing license ${license.id}:`, error);
       }
     }
     
-    logger.info(`Processed ${notificationCount} license notifications`);
+    // Send one email per recipient with all their expiring licenses
+    let notificationCount = 0;
+    
+    for (const [recipient, { email, userEmail, licenses }] of licensesByRecipient) {
+      if (licenses.length === 0) continue;
+      
+      try {
+        // Send notification email with all licenses for this recipient
+        const emailSent = await sendLicenseExpirationEmail(
+          licenses,  // Array of {license, daysUntilExpiry} objects
+          email,     // Recipient email
+          userEmail  // User email for reply-to
+        );
+        
+        if (emailSent) {
+          notificationCount += licenses.length;
+          logger.info(`Notification sent for ${licenses.length} licenses to ${email}`);
+        }
+      } catch (error) {
+        logger.error(`Error sending email to ${email}:`, error);
+      }
+    }
+    
+    logger.info(`Processed ${notificationCount} license notifications for ${licensesByRecipient.size} recipients`);
     return { success: true, count: notificationCount };
   } catch (error) {
     logger.error('Error processing license expirations:', error);
