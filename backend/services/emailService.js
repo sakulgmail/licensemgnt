@@ -134,11 +134,11 @@ async function sendLicenseExpirationEmail(licenses, recipient, userEmail) {
     `;
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@itpattana.com',
+      from: process.env.EMAIL_FROM || 'License Management System <itmeesakul@gmail.com>',
       to: recipient,
       subject: subject,
       html: html,
-      replyTo: userEmail || process.env.REPLY_TO_EMAIL,
+      replyTo: process.env.EMAIL_REPLY_TO || 'noreply@itpattana.com',
       headers: {
         'X-Auto-Response-Suppress': 'OOF, AutoReply',
         'Precedence': 'bulk'
