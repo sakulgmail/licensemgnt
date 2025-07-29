@@ -178,6 +178,7 @@ const Licenses = () => {
   const [vendors, setVendors] = useState([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
@@ -363,13 +364,22 @@ const Licenses = () => {
       });
       
       if (!controller.signal.aborted) {
-        const licensesData = Array.isArray(licensesRes.data) ? 
-          licensesRes.data : 
-          (licensesRes.data?.data || []);
-          
+        let licensesData = [];
+        let total = 0;
+        
+        // Handle different response formats
+        if (Array.isArray(licensesRes.data)) {
+          licensesData = licensesRes.data;
+          total = licensesRes.headers['x-total-count'] || licensesData.length;
+        } else if (licensesRes.data && Array.isArray(licensesRes.data.data)) {
+          licensesData = licensesRes.data.data;
+          total = licensesRes.data.pagination?.total || licensesRes.data.total || licensesData.length;
+        }
+        
         // Only update if the search term hasn't changed since we started the request
         if (!controller.signal.aborted && searchRef.current === currentSearchTerm) {
           setLicenses(licensesData);
+          setTotalCount(Number(total) || 0);
         }
       }
     } catch (error) {
@@ -724,16 +734,19 @@ const Licenses = () => {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[5, 10, 25, { label: 'All', value: -1 }]}
+            rowsPerPageOptions={[5, 10, 25]}
             component="div"
-            count={licenses.length}
+            count={totalCount}
             rowsPerPage={rowsPerPage}
             page={page}
-            onPageChange={handleChangePage}
+            onPageChange={(event, newPage) => setPage(newPage)}
             onRowsPerPageChange={(event) => {
               setRowsPerPage(parseInt(event.target.value, 10));
               setPage(0);
             }}
+            labelDisplayedRows={({ from, to, count }) => 
+              `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`
+            }
           />
         </Paper>
 

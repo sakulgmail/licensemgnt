@@ -74,6 +74,7 @@ const Vendors = () => {
   const [vendors, setVendors] = useState([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
@@ -96,7 +97,9 @@ const Vendors = () => {
       
       // Handle paginated response
       const vendorsData = response.data.data || [];
+      const count = response.data.pagination?.total || vendorsData.length;
       setVendors(Array.isArray(vendorsData) ? vendorsData : []);
+      setTotalCount(count);
       
     } catch (error) {
       console.error('Error fetching vendors:', error);
@@ -310,15 +313,18 @@ const Vendors = () => {
           </Table>
         </TableContainer>
         <TablePagination
-          rowsPerPageOptions={[5, 10, 25, { label: 'All', value: -1 }]}
+          rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={vendors.length}
+          count={totalCount}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
           onRowsPerPageChange={(event) => {
             setRowsPerPage(parseInt(event.target.value, 10));
             setPage(0);
+          }}
+          labelDisplayedRows={({ from, to, count }) => {
+            return `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`;
           }}
         />
       </Paper>
