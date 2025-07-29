@@ -35,29 +35,44 @@ router.get(
     }
 
     try {
-      const { search = '', limit = 10, page = 1, sortBy = 'name', sortOrder = 'ASC' } = req.query;
+      console.log('Received query params:', req.query);
+      let { search = '', limit = 10, page = 1, sortBy = 'name', sortOrder = 'ASC' } = req.query;
+      
+      // Convert limit to number and validate
+      limit = parseInt(limit, 10);
+      if (isNaN(limit) || limit < 1 || limit > 100) {
+        limit = 10; // Default to 10 if invalid
+      }
+      
       const offset = (page - 1) * limit;
+      console.log('Final params:', { search, limit, page, offset, sortBy, sortOrder });
 
-      const { data, total } = await Customer.getAll({
+      const result = await Customer.getAll({
         search,
         limit,
         offset,
         sortBy,
         sortOrder
       });
+      
+      console.log('Customer.getAll result:', result);
 
       res.json({
-        data,
+        data: result.data || [],
         pagination: {
-          total,
-          page: parseInt(page, 10),
-          totalPages: Math.ceil(total / limit),
+          total: result.total || 0,
+          page: parseInt(page, 10) || 1,
+          totalPages: Math.ceil((result.total || 0) / limit),
           limit: parseInt(limit, 10)
         }
       });
     } catch (err) {
-      console.error('Error fetching customers:', err);
-      res.status(500).send('Server error');
+      console.error('Error in GET /api/customers:', err);
+      console.error('Error stack:', err.stack);
+      res.status(500).json({ 
+        message: 'Server error',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
     }
   }
 );

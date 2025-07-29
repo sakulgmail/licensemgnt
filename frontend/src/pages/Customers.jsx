@@ -20,13 +20,19 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  DialogContentText
+  DialogContentText,
+  Select,
+  MenuItem
 } from '@mui/material';
 import { 
   Add as AddIcon, 
   Edit as EditIcon, 
   Delete as DeleteIcon,
-  Search as SearchIcon
+  Search as SearchIcon,
+  FirstPage as FirstPageIcon,
+  LastPage as LastPageIcon,
+  KeyboardArrowLeft,
+  KeyboardArrowRight
 } from '@mui/icons-material';
 import { Formik, Form, Field } from 'formik';
 import * as Yup from 'yup';
@@ -53,6 +59,7 @@ const Customers = () => {
   const [customers, setCustomers] = useState([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
@@ -65,15 +72,41 @@ const Customers = () => {
   const fetchCustomers = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/customers', {
-        params: {
-          search: searchTerm,
-          page: page + 1,
-          limit: rowsPerPage
-        }
-      });
-      // Ensure we're setting an array to the customers state
-      setCustomers(Array.isArray(response.data) ? response.data : response.data.data || []);
+      const params = {
+        search: searchTerm,
+        page: page + 1,
+      };
+      
+      // Only add limit to params if it's not -1 (All option)
+      if (rowsPerPage > 0) {
+        params.limit = rowsPerPage;
+      } else {
+        // When 'All' is selected, we need to fetch all pages
+        params.limit = 1000; // A high number to get all records in one request
+      }
+      
+      console.log('Fetching customers with params:', params);
+      const response = await api.get('/customers', { params });
+      console.log('Customers API response:', response.data);
+      
+      // Handle the paginated response structure
+      const responseData = response.data;
+      let customersData = [];
+      let count = 0;
+      
+      if (Array.isArray(responseData)) {
+        // If the response is a direct array (unlikely with pagination)
+        customersData = responseData;
+        count = responseData.length;
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        // Handle paginated response
+        customersData = responseData.data;
+        count = responseData.pagination?.total || responseData.data.length;
+      }
+      
+      console.log('Setting customers data:', customersData.length, 'items');
+      setCustomers(customersData);
+      setTotalCount(count);
     } catch (error) {
       console.error('Error fetching customers:', error);
       setCustomers([]); // Ensure customers is always an array even on error
@@ -170,13 +203,34 @@ const Customers = () => {
     }
   };
 
-  // Handle pagination
+  // Pagination
+  const totalPages = Math.ceil(totalCount / rowsPerPage);
+  const isFirstPage = page === 0;
+  const isLastPage = page >= totalPages - 1;
+
+  const handleFirstPage = () => {
+    setPage(0);
+  };
+
+  const handlePreviousPage = () => {
+    setPage((prevPage) => Math.max(prevPage - 1, 0));
+  };
+
+  const handleNextPage = () => {
+    setPage((prevPage) => Math.min(prevPage + 1, totalPages - 1));
+  };
+
+  const handleLastPage = () => {
+    setPage(Math.max(0, totalPages - 1));
+  };
+
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
   };
 
   const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
+    const newRowsPerPage = parseInt(event.target.value, 10);
+    setRowsPerPage(newRowsPerPage);
     setPage(0);
   };
 
@@ -192,9 +246,9 @@ const Customers = () => {
   };
 
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1">
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
           Customers
         </Typography>
         <Button
@@ -270,15 +324,59 @@ const Customers = () => {
             </TableBody>
           </Table>
         </TableContainer>
-        <TablePagination
-          rowsPerPageOptions={[5, 10, 25]}
-          component="div"
-          count={customers.length}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', p: 1, borderTop: '1px solid rgba(224, 224, 224, 1)' }}>
+          <Box sx={{ flexShrink: 0, mr: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              {`${page * rowsPerPage + 1}-${Math.min((page + 1) * rowsPerPage, totalCount)} of ${totalCount}`}
+            </Typography>
+          </Box>
+          <IconButton
+            onClick={handleFirstPage}
+            disabled={isFirstPage}
+            aria-label="first page"
+            size="small"
+            sx={{ ml: 1 }}
+          >
+            <FirstPageIcon />
+          </IconButton>
+          <IconButton
+            onClick={handlePreviousPage}
+            disabled={isFirstPage}
+            aria-label="previous page"
+            size="small"
+          >
+            <KeyboardArrowLeft />
+          </IconButton>
+          <IconButton
+            onClick={handleNextPage}
+            disabled={isLastPage}
+            aria-label="next page"
+            size="small"
+          >
+            <KeyboardArrowRight />
+          </IconButton>
+          <IconButton
+            onClick={handleLastPage}
+            disabled={isLastPage}
+            aria-label="last page"
+            size="small"
+            sx={{ mr: 1 }}
+          >
+            <LastPageIcon />
+          </IconButton>
+          <Select
+            value={rowsPerPage}
+            onChange={handleChangeRowsPerPage}
+            size="small"
+            variant="standard"
+            sx={{ minWidth: 80 }}
+          >
+            <MenuItem value={5}>5</MenuItem>
+            <MenuItem value={10}>10</MenuItem>
+            <MenuItem value={25}>25</MenuItem>
+          </Select>
+          <Typography variant="body2" sx={{ ml: 1 }}>per page</Typography>
+        </Box>
       </Paper>
 
       {/* Add/Edit Customer Dialog */}

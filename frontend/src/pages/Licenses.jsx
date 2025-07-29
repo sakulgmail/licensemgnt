@@ -724,13 +724,16 @@ const Licenses = () => {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[5, 10, 25]}
+            rowsPerPageOptions={[5, 10, 25, { label: 'All', value: -1 }]}
             component="div"
             count={licenses.length}
             rowsPerPage={rowsPerPage}
             page={page}
             onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
           />
         </Paper>
 

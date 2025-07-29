@@ -3,27 +3,53 @@ const { pool } = require('../config/db');
 class Customer {
   // Get all customers with optional search and pagination
   static async getAll({ search = '', limit = 10, offset = 0, sortBy = 'name', sortOrder = 'ASC' }) {
-    const query = {
-      text: `
-        SELECT c.*, u.username as created_by_username,
-               COUNT(*) OVER() as total_count
-        FROM customers c
-        LEFT JOIN users u ON c.created_by = u.id
-        WHERE c.name ILIKE $1 OR c.contact_person ILIKE $1 OR c.email ILIKE $1
-        ORDER BY ${sortBy} ${sortOrder === 'DESC' ? 'DESC' : 'ASC'}
-        LIMIT $2 OFFSET $3
-      `,
-      values: [`%${search}%`, limit, offset]
-    };
+    try {
+      // Validate and sanitize sortBy to prevent SQL injection
+      const validSortColumns = ['name', 'contact_person', 'email', 'created_at'];
+      const safeSortBy = validSortColumns.includes(sortBy.toLowerCase()) ? sortBy : 'name';
+      const safeSortOrder = sortOrder.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+      
+      const query = {
+        text: `
+          SELECT c.*, u.username as created_by_username,
+                COUNT(*) OVER() as total_count
+          FROM customers c
+          LEFT JOIN users u ON c.created_by = u.id
+          WHERE c.name ILIKE $1 OR c.contact_person ILIKE $1 OR c.email ILIKE $1
+          ORDER BY ${safeSortBy} ${safeSortOrder}
+          LIMIT $2 OFFSET $3
+        `,
+        values: [`%${search}%`, limit, offset]
+      };
 
-    const result = await pool.query(query);
-    return {
-      data: result.rows.map(row => {
+      console.log('Executing SQL query:', {
+        query: query.text,
+        values: query.values,
+        search, limit, offset, sortBy, sortOrder
+      });
+
+      const result = await pool.query(query);
+      
+      console.log('Query result count:', result.rows.length);
+      console.log('First row total_count:', result.rows[0]?.total_count);
+      
+      const data = result.rows.map(row => {
         const { total_count, ...customer } = row;
         return customer;
-      }),
-      total: result.rows[0]?.total_count || 0
-    };
+      });
+      
+      const total = result.rows[0]?.total_count || 0;
+      
+      console.log('Returning data:', { dataLength: data.length, total });
+      return {
+        data,
+        total: parseInt(total, 10) || 0
+      };
+    } catch (error) {
+      console.error('Error in Customer.getAll:', error);
+      console.error('Error stack:', error.stack);
+      throw error; // Re-throw the error to be handled by the route
+    }
   }
 
   // Get customer by ID

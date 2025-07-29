@@ -72,8 +72,13 @@ async function sendLicenseExpirationEmail(licenses, recipient, userEmail) {
       throw new Error('No recipient email address provided');
     }
 
-    // Sort licenses by days until expiry (ascending)
-    const sortedLicenses = [...licenses].sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+    // Flatten the license data structure and sort by days until expiry (ascending)
+    const flattenedLicenses = licenses.map(item => ({
+      ...item.license,
+      days_until_expiry: item.daysUntilExpiry
+    }));
+    
+    const sortedLicenses = [...flattenedLicenses].sort((a, b) => a.days_until_expiry - b.days_until_expiry);
     const expiringSoonest = sortedLicenses[0];
     
     // Calculate total number of licenses expiring
@@ -81,55 +86,109 @@ async function sendLicenseExpirationEmail(licenses, recipient, userEmail) {
     const hasMultiple = expiringCount > 1;
     
     // Create subject line with the soonest expiring license
-    const { name, vendor_name } = expiringSoonest.license;
+    const { name, vendor_name } = expiringSoonest;
     const subject = hasMultiple 
       ? `[Action Required] ${expiringCount} licenses expiring soon (${expiringSoonest.daysUntilExpiry} days)`
       : `[Action Required] ${name} ${vendor_name ? `(${vendor_name}) ` : ''}expires in ${expiringSoonest.daysUntilExpiry} day${expiringSoonest.daysUntilExpiry !== 1 ? 's' : ''}`;
     
-    // Create email content with table of expiring licenses
+    // Categorize licenses into expired and expiring
+    const expiredLicenses = sortedLicenses.filter(license => license.days_until_expiry < 0);
+    const expiringLicenses = sortedLicenses.filter(license => license.days_until_expiry >= 0);
+    
+    // Create email content with tables for expired and expiring licenses
     let html = `
       <h2>License Expiration Notice</h2>
-      <p>This is a notification that ${hasMultiple ? `you have ${expiringCount} licenses expiring soon` : 'a license is expiring soon'}:</p>
+      <p>This is a notification about ${expiredLicenses.length > 0 ? 'expired and expiring' : 'expiring'} licenses:</p>`;
+    
+    // Add expired licenses section if there are any
+    if (expiredLicenses.length > 0) {
+      html += `
+      <div style="margin-bottom: 30px;">
+        <h3 style="color: #dc3545;">⚠️ Expired Licenses (${expiredLicenses.length})</h3>
+        <p>The following licenses have already expired and may need immediate attention:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-family: Arial, sans-serif; border: 1px solid #ffebee; background-color: #fff5f5;">
+          <thead>
+            <tr style="background-color: #ffebee;">
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ffcdd2;">License</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ffcdd2;">Customer</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ffcdd2;">Vendor</th>
+              <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ffcdd2;">Expired</th>
+            </tr>
+          </thead>
+          <tbody>`;
       
-      <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-family: Arial, sans-serif;">
-        <thead>
-          <tr style="background-color: #f5f5f5;">
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">License</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Customer</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Vendor</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">Expiration</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">Days Left</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${sortedLicenses.map(({ license, daysUntilExpiry }) => {
-            const expiryDate = new Date(license.expiration_date).toLocaleDateString();
-            const isExpired = daysUntilExpiry < 0;
-            const rowStyle = isExpired 
-              ? 'background-color: #ffebee; color: #c62828;' 
-              : daysUntilExpiry <= 7 
-                ? 'background-color: #fff8e1;' 
-                : '';
-                
-            return `
-              <tr style="${rowStyle}">
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">
-                  <strong>${license.name}</strong><br>
-                  <small style="color: #666;">${license.license_key || 'No key'}</small>
-                </td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${license.customer_name || 'N/A'}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${license.vendor_name || 'N/A'}</td>
-                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee;">${expiryDate}</td>
-                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee; font-weight: bold; color: ${isExpired ? '#c62828' : daysUntilExpiry <= 7 ? '#e65100' : '#2e7d32'}">
-                  ${isExpired ? `Expired ${-daysUntilExpiry} day${-daysUntilExpiry !== 1 ? 's' : ''} ago` : `${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}`}
-                </td>
-              </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+      // Add expired licenses to the table
+      expiredLicenses.forEach(license => {
+        const { name, customer_name, vendor_name, days_until_expiry } = license;
+        const days = Math.abs(days_until_expiry);
+        const statusText = `${days} day${days !== 1 ? 's' : ''} ago`;
+        
+        html += `
+          <tr style="border-bottom: 1px solid #ffcdd2;">
+            <td style="padding: 12px; border-bottom: 1px solid #ffcdd2;">${name || 'N/A'}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #ffcdd2;">${customer_name || 'N/A'}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #ffcdd2;">${vendor_name || 'N/A'}</td>
+            <td style="padding: 12px; text-align: right; border-bottom: 1px solid #ffcdd2; color: #dc3545; font-weight: bold;">
+              ${statusText}
+            </td>
+          </tr>`;
+      });
       
-      <p>Please take appropriate action to renew or cancel these licenses.</p>
-      <p>This is an automated message. Please do not reply to this email.</p>
+      html += `
+          </tbody>
+        </table>
+      </div>`;
+    }
+    
+    // Add expiring licenses section if there are any
+    if (expiringLicenses.length > 0) {
+      html += `
+      <div style="margin-top: ${expiredLicenses.length > 0 ? '30' : '0'}px; margin-bottom: 30px;">
+        <h3 style="color: #28a745;">📅 Expiring Soon (${expiringLicenses.length})</h3>
+        <p>The following licenses will expire soon:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-family: Arial, sans-serif; border: 1px solid #e8f5e9; background-color: #f8f9fa;">
+          <thead>
+            <tr style="background-color: #e8f5e9;">
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #c8e6c9;">License</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #c8e6c9;">Customer</th>
+              <th style="padding: 12px; text-align: left; border-bottom: 2px solid #c8e6c9;">Vendor</th>
+              <th style="padding: 12px; text-align: right; border-bottom: 2px solid #c8e6c9;">Expires In</th>
+            </tr>
+          </thead>
+          <tbody>`;
+      
+      // Add expiring licenses to the table
+      expiringLicenses.forEach(license => {
+        const { name, customer_name, vendor_name, days_until_expiry } = license;
+        const days = days_until_expiry;
+        const statusText = `in ${days} day${days !== 1 ? 's' : ''}`;
+        const statusStyle = days <= 3 
+          ? 'color: #ffc107; font-weight: bold;' 
+          : 'color: #28a745;';
+        
+        html += `
+          <tr style="border-bottom: 1px solid #e8f5e9;">
+            <td style="padding: 12px; border-bottom: 1px solid #e8f5e9;">${name || 'N/A'}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e8f5e9;">${customer_name || 'N/A'}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e8f5e9;">${vendor_name || 'N/A'}</td>
+            <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e8f5e9; ${statusStyle}">
+              ${statusText}
+            </td>
+          </tr>`;
+      });
+      
+      html += `
+          </tbody>
+        </table>
+      </div>`;
+    }
+    
+    // Add footer
+    html += `
+      <p>Please review these licenses and take appropriate action to renew or update them as needed.</p>
+      ${expiredLicenses.length > 0 ? "<p><strong>Note:</strong> Expired licenses may affect your compliance status and should be addressed immediately.</p>" : ""}
+      <p>You can view and manage these licenses by logging into the License Management System.</p>
+      <p>If you have any questions, please contact your system administrator.</p>
       ${userEmail ? '<p>--<br>License Management System</p>' : ''}
     `;
 
@@ -187,13 +246,25 @@ async function sendLicenseExpirationEmail(licenses, recipient, userEmail) {
 async function getExpiringLicenses(daysAhead = 7, includeInactive = false) {
   try {
     const query = `
-      SELECT l.*, v.name as vendor_name, c.name as customer_name
+      SELECT 
+        l.*, 
+        v.name as vendor_name, 
+        c.name as customer_name,
+        (l.expiration_date - CURRENT_DATE) as days_until_expiry
       FROM licenses l
       LEFT JOIN vendors v ON l.vendor_id = v.id
       LEFT JOIN customers c ON l.customer_id = c.id
-      WHERE l.expiration_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + $1::integer * INTERVAL '1 day')
-      AND l.is_active = true
-      ORDER BY l.expiration_date ASC
+      WHERE (
+        l.expiration_date BETWEEN (CURRENT_DATE - ($1::integer * INTERVAL '1 day')) AND (CURRENT_DATE + ($1::integer * INTERVAL '1 day'))
+        OR l.expiration_date < CURRENT_DATE
+      )
+      ${includeInactive ? '' : 'AND l.is_active = true'}
+      ORDER BY 
+        CASE 
+          WHEN l.expiration_date < CURRENT_DATE THEN 0
+          ELSE 1 
+        END,
+        ABS((l.expiration_date - CURRENT_DATE))
     `;
 
     logger.debug('Checking for expiring contracts with query:', {
