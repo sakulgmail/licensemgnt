@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 
 // Error fallback component
@@ -152,6 +152,16 @@ function Settings() {
     severity: 'success'
   });
 
+  // Initial users data - defined outside the component to persist between renders
+  const initialUsers = [
+    { id: 1, name: 'Admin User', email: 'admin@example.com', role: 'admin', active: true },
+    { id: 2, name: 'John Doe', email: 'john@example.com', role: 'user', active: true },
+    { id: 3, name: 'Jane Smith', email: 'jane@example.com', role: 'user', active: false }
+  ];
+  
+  // Keep track of whether we've initialized users
+  const usersInitialized = useRef(false);
+
   // Fetch settings and users with error boundary
   const fetchData = useCallback(async () => {
     try {
@@ -159,18 +169,15 @@ function Settings() {
       setError(null);
       
       // Fetch notification settings from the backend
-      const [settingsRes, usersRes] = await Promise.all([
-        api.get('/settings/notifications').catch(() => ({
-          data: {
-            daysBeforeExpiration: 30,
-            notificationTime: '09:00',
-            sendToEmail: true,
-            emailAddress: 'admin@example.com',
-            includeInactive: false
-          }
-        })),
-        // api.get('/users') // Uncomment when user management is implemented
-      ]);
+      const settingsRes = await api.get('/settings/notifications').catch(() => ({
+        data: {
+          daysBeforeExpiration: 30,
+          notificationTime: '09:00',
+          sendToEmail: true,
+          emailAddress: 'admin@example.com',
+          includeInactive: false
+        }
+      }));
       
       // Update notification settings with data from the backend
       setNotificationSettings(settingsRes.data);
@@ -183,11 +190,11 @@ function Settings() {
         confirmPassword: ''
       });
       
-      setUsers([
-        { id: 1, name: 'Admin User', email: 'admin@example.com', role: 'admin', active: true },
-        { id: 2, name: 'John Doe', email: 'john@example.com', role: 'user', active: true },
-        { id: 3, name: 'Jane Smith', email: 'jane@example.com', role: 'user', active: false }
-      ]);
+      // Only initialize users once on first load
+      if (!usersInitialized.current) {
+        setUsers(initialUsers);
+        usersInitialized.current = true;
+      }
       
       setLoading(false);
     } catch (err) {
@@ -306,12 +313,16 @@ function Settings() {
       if (userData.id) {
         // Update existing user
         // await api.put(`/users/${userData.id}`, userData);
-        setUsers(users.map(u => u.id === userData.id ? userData : u));
+        setUsers(prevUsers => prevUsers.map(u => u.id === userData.id ? userData : u));
       } else {
         // Create new user
         // const newUser = await api.post('/users', userData);
-        const newUser = { ...userData, id: Date.now() }; // Mock ID
-        setUsers([...users, newUser]);
+        const newUser = { 
+          ...userData, 
+          id: Date.now(), // Mock ID
+          active: true // Ensure new users are active by default
+        };
+        setUsers(prevUsers => [...prevUsers, newUser]);
       }
       
       setSnackbar({
@@ -337,11 +348,29 @@ function Settings() {
   };
 
   const handleDeleteConfirm = async () => {
+    if (!userToDelete) return;
+    
     try {
       // In a real app, you would delete the user via API
       // await api.delete(`/users/${userToDelete.id}`);
       
-      setUsers(users.filter(u => u.id !== userToDelete.id));
+      // Use functional update to ensure we have the latest state
+      setUsers(prevUsers => {
+        // Don't allow deleting the last admin user
+        const remainingAdmins = prevUsers.filter(u => u.role === 'admin' && u.id !== userToDelete.id).length;
+        if (userToDelete.role === 'admin' && remainingAdmins === 0) {
+          setSnackbar({
+            open: true,
+            message: 'Cannot delete the last admin user',
+            severity: 'error'
+          });
+          return prevUsers;
+        }
+        
+        const updatedUsers = prevUsers.filter(u => u.id !== userToDelete.id);
+        return updatedUsers;
+      });
+      
       setSnackbar({
         open: true,
         message: 'User deleted successfully',
@@ -355,6 +384,8 @@ function Settings() {
         severity: 'error'
       });
     } finally {
+      setOpenDeleteDialog(false);
+      setUserToDelete(null);
       setOpenDeleteDialog(false);
       setUserToDelete(null);
     }
