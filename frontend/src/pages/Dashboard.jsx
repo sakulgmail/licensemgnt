@@ -40,7 +40,6 @@ const Dashboard = () => {
     totalCustomers: 0,
     totalVendors: 0
   });
-  const [recentLicenses, setRecentLicenses] = useState([]);
   const [expiringLicenses, setExpiringLicenses] = useState([]);
   const [vendorDistribution, setVendorDistribution] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,22 +52,6 @@ const Dashboard = () => {
       // First, fetch stats
       const statsRes = await api.get('/dashboard/stats');
       setStats(statsRes.data);
-      
-      // Then fetch recent licenses
-      const recentRes = await api.get('/licenses', { 
-        params: { 
-          limit: 5, 
-          sortBy: 'purchase_date',
-          sortOrder: 'desc',
-          include: 'customer,vendor'
-        } 
-      });
-      
-      // Handle different response structures
-      const recentData = Array.isArray(recentRes.data) ? 
-        recentRes.data : 
-        (recentRes.data?.data || []);
-      setRecentLicenses(recentData);
       
       // Fetch expiring licenses
       const expiringRes = await api.get('/dashboard/expiring-soon');
@@ -90,7 +73,6 @@ const Dashboard = () => {
       
       console.log('Dashboard data loaded:', {
         stats: statsRes.data,
-        recentLicenses: recentData,
         expiringLicenses: expiringRes.data,
         vendors: vendorsData
       });
@@ -267,21 +249,22 @@ const Dashboard = () => {
 
         {/* Main Content */}
         <Grid container spacing={3}>
-          {/* Expiring Soon Licenses */}
-          <Grid item xs={12} md={6}>
-            <Paper elevation={3} sx={{ p: 2, height: '100%' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" component="h2">
+          {/* Expiring Soon Licenses - Full width */}
+          <Grid item xs={12} sx={{ width: '100%' }}>
+            <Paper elevation={3} sx={{ p: 3, width: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h5" component="h2" sx={{ fontWeight: 'bold' }}>
                   Licenses Expiring Soon
                 </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <SearchIcon sx={{ color: 'action.active', mr: 1 }} />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <SearchIcon sx={{ color: 'action.active' }} />
                   <TextField
                     variant="outlined"
-                    placeholder="Search..."
+                    placeholder="Search expiring licenses..."
                     size="small"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
+                    sx={{ minWidth: 300 }}
                   />
                 </Box>
               </Box>
@@ -317,32 +300,44 @@ const Dashboard = () => {
                           primary={license.name || 'Unnamed License'}
                           primaryTypographyProps={{
                             color: isExpiredFlag ? 'error.main' : (isExpiringSoonFlag ? 'warning.main' : 'text.primary'),
-                            fontWeight: 'medium'
+                            fontWeight: 'medium',
+                            mb: 0.5
                           }}
                           secondary={
-                            <>
-                              <Box component="span" sx={{ display: 'block' }}>
-                                {customerName} • {vendorName}
-                              </Box>
-                              <Box component="span" sx={{ display: 'block', color: 'text.secondary' }}>
-                                Expires: {formatDate(license.expiration_date)}
+                            <Grid container spacing={3} alignItems="center" wrap="nowrap">
+                              <Grid item xs={3}>
+                                <Typography noWrap variant="body2" color="text.secondary">
+                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Customer:</Box> {customerName}
+                                </Typography>
+                              </Grid>
+                              <Grid item xs={3}>
+                                <Typography noWrap variant="body2" color="text.secondary">
+                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Vendor:</Box> {vendorName}
+                                </Typography>
+                              </Grid>
+                              <Grid item xs={3}>
+                                <Typography noWrap variant="body2" color="text.secondary">
+                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Expires:</Box> {formatDate(license.expiration_date)}
+                                </Typography>
+                              </Grid>
+                              <Grid item xs={3}>
                                 {isExpiredFlag ? (
                                   <Chip 
                                     label="Expired" 
                                     size="small" 
                                     color="error" 
-                                    sx={{ ml: 1, display: 'inline-flex', verticalAlign: 'middle' }} 
+                                    sx={{ display: 'inline-flex' }} 
                                   />
                                 ) : isExpiringSoonFlag ? (
                                   <Chip 
                                     label="Expiring Soon" 
                                     size="small" 
                                     color="warning" 
-                                    sx={{ ml: 1, display: 'inline-flex', verticalAlign: 'middle' }} 
+                                    sx={{ display: 'inline-flex' }} 
                                   />
                                 ) : null}
-                              </Box>
-                            </>
+                              </Grid>
+                            </Grid>
                           }
                           secondaryTypographyProps={{ component: 'div' }}
                         />
@@ -356,93 +351,6 @@ const Dashboard = () => {
                     {searchTerm 
                       ? 'No matching licenses found' 
                       : 'No licenses expiring soon'}
-                  </Typography>
-                </Box>
-              )}
-            </Paper>
-          </Grid>
-
-          {/* Recent Licenses */}
-          <Grid item xs={12} md={6}>
-            <Paper elevation={3} sx={{ p: 2, height: '100%' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" component="h2">
-                  Recent Licenses
-                </Typography>
-                <Tooltip title="Refresh">
-                  <IconButton onClick={fetchDashboardData} size="small">
-                    <RefreshIcon />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              {loading ? (
-                <Box display="flex" justifyContent="center" p={2}>
-                  <CircularProgress />
-                </Box>
-              ) : recentLicenses.length > 0 ? (
-                <List dense>
-                  {recentLicenses.map((license) => {
-                    const customerName = license.customer_name || license.customer?.name || 'No Customer';
-                    const vendorName = license.vendor_name || license.vendor?.name || 'No Vendor';
-                    const isExpiredFlag = isExpired(license.expiration_date);
-                    const isExpiringSoonFlag = !isExpiredFlag && isExpiringSoon(license.expiration_date);
-
-                    return (
-                      <ListItem 
-                        key={license.id}
-                        sx={{ 
-                          mb: 1,
-                          bgcolor: 'background.paper',
-                          borderRadius: 1,
-                          '&:hover': {
-                            bgcolor: 'action.hover'
-                          }
-                        }}
-                      >
-                        <ListItemIcon>
-                          <ArticleIcon color={isExpiredFlag ? 'error' : (isExpiringSoonFlag ? 'warning' : 'primary')} />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={license.name || 'Unnamed License'}
-                          primaryTypographyProps={{
-                            color: isExpiredFlag ? 'error.main' : (isExpiringSoonFlag ? 'warning.main' : 'text.primary'),
-                            fontWeight: 'medium'
-                          }}
-                          secondary={
-                            <>
-                              <Box component="span" display="block">
-                                {customerName} • {vendorName}
-                              </Box>
-                              <Box component="span" display="block" color="text.secondary">
-                                Purchased: {formatDate(license.purchase_date)}
-                                {isExpiredFlag ? (
-                                  <Chip 
-                                    label="Expired" 
-                                    size="small" 
-                                    color="error" 
-                                    sx={{ ml: 1 }} 
-                                  />
-                                ) : isExpiringSoonFlag ? (
-                                  <Chip 
-                                    label="Expiring Soon" 
-                                    size="small" 
-                                    color="warning" 
-                                    sx={{ ml: 1 }} 
-                                  />
-                                ) : null}
-                              </Box>
-                            </>
-                          }
-                        />
-                      </ListItem>
-                    );
-                  })}
-                </List>
-              ) : (
-                <Box display="flex" justifyContent="center" p={2}>
-                  <Typography color="textSecondary">
-                    No recent licenses found
                   </Typography>
                 </Box>
               )}

@@ -59,8 +59,7 @@ router.get('/expiring-soon', authenticate, async (req, res) => {
        LEFT JOIN customers c ON l.customer_id = c.id
        LEFT JOIN vendors v ON l.vendor_id = v.id
        WHERE l.expiration_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')
-       ORDER BY l.expiration_date ASC
-       LIMIT 10`
+       ORDER BY l.expiration_date ASC`
     );
     
     res.json(result.rows);
