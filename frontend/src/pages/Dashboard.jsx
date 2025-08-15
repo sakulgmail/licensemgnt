@@ -36,11 +36,9 @@ const Dashboard = () => {
     totalLicenses: 0,
     activeLicenses: 0,
     expiredLicenses: 0,
-    expiringSoon: 0,
     totalCustomers: 0,
     totalVendors: 0
   });
-  const [expiringLicenses, setExpiringLicenses] = useState([]);
   const [vendorDistribution, setVendorDistribution] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -53,28 +51,13 @@ const Dashboard = () => {
       const statsRes = await api.get('/dashboard/stats');
       setStats(statsRes.data);
       
-      // Fetch expiring licenses
-      const expiringRes = await api.get('/dashboard/expiring-soon');
-      setExpiringLicenses(expiringRes.data || []);
-      
       // Fetch vendors for distribution
-      const vendorsRes = await api.get('/vendors');
-      const vendorsData = Array.isArray(vendorsRes.data) ? 
-        vendorsRes.data : 
-        (vendorsRes.data?.data || []);
-      
-      // Prepare vendor distribution data
-      const vendorData = vendorsData.map(vendor => ({
-        name: vendor.name,
-        licenses: 0 // We'll update this in the next step
-      }));
-      
-      setVendorDistribution(vendorData);
+      const vendorsRes = await api.get('/dashboard/vendor-distribution');
+      setVendorDistribution(vendorsRes.data || []);
       
       console.log('Dashboard data loaded:', {
         stats: statsRes.data,
-        expiringLicenses: expiringRes.data,
-        vendors: vendorsData
+        vendors: vendorsRes.data
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -86,18 +69,6 @@ const Dashboard = () => {
   useEffect(() => {
     fetchDashboardData();
   }, []);
-
-  // Filter expiring licenses based on search term
-  const filteredExpiringLicenses = expiringLicenses.filter(license => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      (license.name || '').toLowerCase().includes(searchLower) ||
-      (license.customer_name || license.customer?.name || '').toLowerCase().includes(searchLower) ||
-      (license.vendor_name || license.vendor?.name || '').toLowerCase().includes(searchLower) ||
-      (license.license_key || '').toLowerCase().includes(searchLower)
-    );
-  });
 
   // Format date for display
   const formatDate = (dateString) => {
@@ -189,21 +160,6 @@ const Dashboard = () => {
             <Card elevation={3}>
               <CardContent>
                 <Box display="flex" alignItems="center" mb={1}>
-                  <WarningIcon color="warning" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Expiring Soon
-                  </Typography>
-                </Box>
-                <Typography variant="h4" color="warning.main">
-                  {loading ? '...' : stats.expiringSoon || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
                   <WarningIcon color="error" sx={{ mr: 1 }} />
                   <Typography color="textSecondary" variant="subtitle2">
                     Expired Licenses
@@ -249,113 +205,6 @@ const Dashboard = () => {
 
         {/* Main Content */}
         <Grid container spacing={3}>
-          {/* Expiring Soon Licenses - Full width */}
-          <Grid item xs={12} sx={{ width: '100%' }}>
-            <Paper elevation={3} sx={{ p: 3, width: '100%' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h5" component="h2" sx={{ fontWeight: 'bold' }}>
-                  Licenses Expiring Soon
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <SearchIcon sx={{ color: 'action.active' }} />
-                  <TextField
-                    variant="outlined"
-                    placeholder="Search expiring licenses..."
-                    size="small"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    sx={{ minWidth: 300 }}
-                  />
-                </Box>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              {loading ? (
-                <Box display="flex" justifyContent="center" p={2}>
-                  <CircularProgress />
-                </Box>
-              ) : filteredExpiringLicenses.length > 0 ? (
-                <List dense>
-                  {filteredExpiringLicenses.map((license) => {
-                    const customerName = license.customer_name || license.customer?.name || 'No Customer';
-                    const vendorName = license.vendor_name || license.vendor?.name || 'No Vendor';
-                    const isExpiredFlag = isExpired(license.expiration_date);
-                    const isExpiringSoonFlag = !isExpiredFlag && isExpiringSoon(license.expiration_date);
-
-                    return (
-                      <ListItem 
-                        key={license.id}
-                        sx={{ 
-                          mb: 1,
-                          bgcolor: 'background.paper',
-                          borderRadius: 1,
-                          '&:hover': {
-                            bgcolor: 'action.hover'
-                          }
-                        }}
-                      >
-                        <ListItemIcon>
-                          <ArticleIcon color={isExpiredFlag ? 'error' : (isExpiringSoonFlag ? 'warning' : 'primary')} />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={license.name || 'Unnamed License'}
-                          primaryTypographyProps={{
-                            color: isExpiredFlag ? 'error.main' : (isExpiringSoonFlag ? 'warning.main' : 'text.primary'),
-                            fontWeight: 'medium',
-                            mb: 0.5
-                          }}
-                          secondary={
-                            <Grid container spacing={3} alignItems="center" wrap="nowrap">
-                              <Grid item xs={3}>
-                                <Typography noWrap variant="body2" color="text.secondary">
-                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Customer:</Box> {customerName}
-                                </Typography>
-                              </Grid>
-                              <Grid item xs={3}>
-                                <Typography noWrap variant="body2" color="text.secondary">
-                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Vendor:</Box> {vendorName}
-                                </Typography>
-                              </Grid>
-                              <Grid item xs={3}>
-                                <Typography noWrap variant="body2" color="text.secondary">
-                                  <Box component="span" sx={{ fontWeight: 'medium' }}>Expires:</Box> {formatDate(license.expiration_date)}
-                                </Typography>
-                              </Grid>
-                              <Grid item xs={3}>
-                                {isExpiredFlag ? (
-                                  <Chip 
-                                    label="Expired" 
-                                    size="small" 
-                                    color="error" 
-                                    sx={{ display: 'inline-flex' }} 
-                                  />
-                                ) : isExpiringSoonFlag ? (
-                                  <Chip 
-                                    label="Expiring Soon" 
-                                    size="small" 
-                                    color="warning" 
-                                    sx={{ display: 'inline-flex' }} 
-                                  />
-                                ) : null}
-                              </Grid>
-                            </Grid>
-                          }
-                          secondaryTypographyProps={{ component: 'div' }}
-                        />
-                      </ListItem>
-                    );
-                  })}
-                </List>
-              ) : (
-                <Box display="flex" justifyContent="center" p={2}>
-                  <Typography color="textSecondary">
-                    {searchTerm 
-                      ? 'No matching licenses found' 
-                      : 'No licenses expiring soon'}
-                  </Typography>
-                </Box>
-              )}
-            </Paper>
-          </Grid>
         </Grid>
       </Container>
     </LocalizationProvider>
