@@ -47,34 +47,50 @@ const Dashboard = () => {
     totalVendors: 0
   });
   const [vendorDistribution, setVendorDistribution] = useState([]);
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all' or 'expiring'
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
-    fetchAllLicenses(newPage, rowsPerPage);
+    fetchAllLicenses(newPage, rowsPerPage, activeFilter);
   };
 
   const handleChangeRowsPerPage = (event) => {
     const newRowsPerPage = parseInt(event.target.value, 10);
     setRowsPerPage(newRowsPerPage);
     setPage(0);
-    fetchAllLicenses(0, newRowsPerPage);
+    fetchAllLicenses(0, newRowsPerPage, activeFilter);
   };
 
-  const fetchAllLicenses = async (page = 0, limit = 10) => {
+  const fetchAllLicenses = async (page = 0, limit = 10, filter = 'all') => {
     setLicensesLoading(true);
     try {
-      const response = await api.get('/licenses', {
-        params: {
-          page: page + 1, // API is 1-based
-          limit
-        }
-      });
+      let response;
       
-      const licensesData = response.data?.data || [];
-      const total = response.data?.pagination?.total || 0;
-      
-      setLicenses(licensesData);
-      setTotalLicenses(total);
+      if (filter === 'expiring') {
+        // Use the dedicated expiring-soon endpoint
+        response = await api.get('/dashboard/expiring-soon');
+        // The expiring-soon endpoint doesn't support pagination, so we'll handle it client-side
+        const allLicenses = response.data || [];
+        const start = page * limit;
+        const paginatedLicenses = allLicenses.slice(start, start + limit);
+        
+        setLicenses(paginatedLicenses);
+        setTotalLicenses(allLicenses.length);
+      } else {
+        // Use the regular licenses endpoint with pagination
+        response = await api.get('/licenses', {
+          params: {
+            page: page + 1, // API is 1-based
+            limit
+          }
+        });
+        
+        const licensesData = response.data?.data || [];
+        const total = response.data?.pagination?.total || 0;
+        
+        setLicenses(licensesData);
+        setTotalLicenses(total);
+      }
     } catch (error) {
       console.error('Error fetching licenses:', error);
       setError('Failed to load licenses');
@@ -85,9 +101,16 @@ const Dashboard = () => {
 
   const handleLicenseCardClick = () => {
     setShowLicenses(true);
-    if (licenses.length === 0) {
-      fetchAllLicenses(page, rowsPerPage);
+    setActiveFilter('all');
+    if (licenses.length === 0 || activeFilter !== 'all') {
+      fetchAllLicenses(page, rowsPerPage, 'all');
     }
+  };
+
+  const handleExpiringLicensesClick = () => {
+    setShowLicenses(true);
+    setActiveFilter('expiring');
+    fetchAllLicenses(page, rowsPerPage, 'expiring');
   };
 
   const fetchDashboardData = useCallback(async () => {
@@ -187,7 +210,9 @@ const Dashboard = () => {
               title: 'Expiring Licenses', 
               value: stats.expiringLicenses, 
               icon: <WarningIcon color="warning" />,
-              color: 'warning.main'
+              color: 'warning.main',
+              onClick: handleExpiringLicensesClick,
+              clickable: true
             },
             { 
               title: 'Expired Licenses', 
@@ -243,7 +268,7 @@ const Dashboard = () => {
             <Card elevation={3}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  All Licenses
+                  {activeFilter === 'expiring' ? 'Expiring Licenses' : 'All Licenses'}
                 </Typography>
                 {licensesLoading ? (
                   <Box display="flex" justifyContent="center" p={4}>
