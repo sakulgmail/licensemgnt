@@ -49,6 +49,38 @@ const Dashboard = () => {
   const [vendorDistribution, setVendorDistribution] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all'); // 'all' or 'expiring' or 'expired'
 
+  useEffect(() => {
+    const fetchExpiringLicenses = async () => {
+      try {
+        setLicensesLoading(true);
+        const response = await api.get('/dashboard/expiring-soon');
+        setLicenses(response.data || []);
+        setTotalLicenses(response.data?.length || 0);
+        setShowLicenses(true);
+        setActiveFilter('expiring');
+      } catch (error) {
+        console.error('Error fetching expiring licenses:', error);
+        setError('Failed to load expiring licenses');
+      } finally {
+        setLicensesLoading(false);
+      }
+    };
+
+    const loadInitialData = async () => {
+      try {
+        await Promise.all([
+          fetchDashboardData(),
+          fetchExpiringLicenses()
+        ]);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        setError('Failed to load initial data');
+      }
+    };
+
+    loadInitialData();
+  }, []); // Empty dependency array means this runs once on mount
+
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
     fetchAllLicenses(newPage, rowsPerPage, activeFilter);
