@@ -68,4 +68,26 @@ router.get('/expiring-soon', authenticate, async (req, res) => {
   }
 });
 
+// @route   GET /api/dashboard/expired
+// @desc    Get all expired licenses
+// @access  Private
+router.get('/expired', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT l.*, c.name as customer_name, v.name as vendor_name
+       FROM licenses l
+       LEFT JOIN customers c ON l.customer_id = c.id
+       LEFT JOIN vendors v ON l.vendor_id = v.id
+       WHERE l.expiration_date < CURRENT_DATE
+       AND l.is_active = true
+       ORDER BY l.expiration_date ASC`
+    );
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching expired licenses:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;

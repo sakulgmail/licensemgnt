@@ -47,7 +47,7 @@ const Dashboard = () => {
     totalVendors: 0
   });
   const [vendorDistribution, setVendorDistribution] = useState([]);
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all' or 'expiring'
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all' or 'expiring' or 'expired'
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -70,6 +70,18 @@ const Dashboard = () => {
         // Use the dedicated expiring-soon endpoint
         response = await api.get('/dashboard/expiring-soon');
         // The expiring-soon endpoint doesn't support pagination, so we'll handle it client-side
+        const allLicenses = response.data || [];
+        const start = page * limit;
+        const paginatedLicenses = allLicenses.slice(start, start + limit);
+        
+        setLicenses(paginatedLicenses);
+        setTotalLicenses(allLicenses.length);
+      } else if (filter === 'expired') {
+        // Use the dedicated expired endpoint
+        response = await api.get('/dashboard/expired');
+        console.log('Expired licenses:', response.data);
+        
+        // The expired endpoint doesn't support pagination, so we'll handle it client-side
         const allLicenses = response.data || [];
         const start = page * limit;
         const paginatedLicenses = allLicenses.slice(start, start + limit);
@@ -111,6 +123,12 @@ const Dashboard = () => {
     setShowLicenses(true);
     setActiveFilter('expiring');
     fetchAllLicenses(page, rowsPerPage, 'expiring');
+  };
+
+  const handleExpiredLicensesClick = () => {
+    setShowLicenses(true);
+    setActiveFilter('expired');
+    fetchAllLicenses(page, rowsPerPage, 'expired');
   };
 
   const fetchDashboardData = useCallback(async () => {
@@ -218,7 +236,9 @@ const Dashboard = () => {
               title: 'Expired Licenses', 
               value: stats.expiredLicenses, 
               icon: <ErrorIcon color="error" />,
-              color: 'error.main'
+              color: 'error.main',
+              onClick: handleExpiredLicensesClick,
+              clickable: true
             },
             { 
               title: 'Total Customers', 
@@ -268,7 +288,11 @@ const Dashboard = () => {
             <Card elevation={3}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  {activeFilter === 'expiring' ? 'Expiring Licenses' : 'All Licenses'}
+                  {activeFilter === 'expiring' 
+                    ? 'Expiring Soon Licenses' 
+                    : activeFilter === 'expired'
+                      ? 'Expired Licenses'
+                      : 'All Licenses'}
                 </Typography>
                 {licensesLoading ? (
                   <Box display="flex" justifyContent="center" p={4}>
