@@ -1,211 +1,335 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Box, 
   Container, 
   Grid, 
   Typography, 
   Card, 
-  CardContent, 
-  Paper,
-  TextField,
-  Divider,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  Chip,
-  CircularProgress,
+  CardContent,
   IconButton,
-  Tooltip
+  Tooltip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  TablePagination,
+  CircularProgress,
+  Chip
 } from '@mui/material';
 import ArticleIcon from '@mui/icons-material/Article';
 import PeopleIcon from '@mui/icons-material/People';
 import BusinessIcon from '@mui/icons-material/Business';
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ErrorIcon from '@mui/icons-material/Error';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { format, addDays, isBefore, isAfter, parseISO } from 'date-fns';
 import api from '../services/api';
 
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showLicenses, setShowLicenses] = useState(false);
+  const [licenses, setLicenses] = useState([]);
+  const [licensesLoading, setLicensesLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalLicenses, setTotalLicenses] = useState(0);
   const [stats, setStats] = useState({
     totalLicenses: 0,
-    activeLicenses: 0,
+    expiringLicenses: 0,
     expiredLicenses: 0,
     totalCustomers: 0,
     totalVendors: 0
   });
   const [vendorDistribution, setVendorDistribution] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch dashboard data
-  const fetchDashboardData = async () => {
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+    fetchAllLicenses(newPage, rowsPerPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    const newRowsPerPage = parseInt(event.target.value, 10);
+    setRowsPerPage(newRowsPerPage);
+    setPage(0);
+    fetchAllLicenses(0, newRowsPerPage);
+  };
+
+  const fetchAllLicenses = async (page = 0, limit = 10) => {
+    setLicensesLoading(true);
     try {
-      setLoading(true);
-      
-      // First, fetch stats
-      const statsRes = await api.get('/dashboard/stats');
-      setStats(statsRes.data);
-      
-      // Fetch vendors for distribution
-      const vendorsRes = await api.get('/dashboard/vendor-distribution');
-      setVendorDistribution(vendorsRes.data || []);
-      
-      console.log('Dashboard data loaded:', {
-        stats: statsRes.data,
-        vendors: vendorsRes.data
+      const response = await api.get('/licenses', {
+        params: {
+          page: page + 1, // API is 1-based
+          limit
+        }
       });
+      
+      const licensesData = response.data?.data || [];
+      const total = response.data?.pagination?.total || 0;
+      
+      setLicenses(licensesData);
+      setTotalLicenses(total);
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.error('Error fetching licenses:', error);
+      setError('Failed to load licenses');
     } finally {
-      setLoading(false);
+      setLicensesLoading(false);
     }
   };
+
+  const handleLicenseCardClick = () => {
+    setShowLicenses(true);
+    if (licenses.length === 0) {
+      fetchAllLicenses(page, rowsPerPage);
+    }
+  };
+
+  const fetchDashboardData = useCallback(async () => {
+    let isMounted = true;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // First, fetch the stats which we know exists
+      const statsRes = await api.get('/dashboard/stats')
+        .catch(err => { 
+          throw new Error('Failed to load dashboard statistics'); 
+        });
+      
+      if (isMounted) {
+        setStats(statsRes.data);
+      }
+      
+      // Then try to fetch vendor distribution if available
+      try {
+        const vendorsRes = await api.get('/dashboard/vendor-distribution')
+          .catch(() => ({})); // Prevent uncaught promise rejection
+          
+        if (isMounted && vendorsRes?.data) {
+          setVendorDistribution(Array.isArray(vendorsRes.data) ? vendorsRes.data : []);
+        }
+      } catch (vendorError) {
+        console.warn('Vendor distribution not available:', vendorError.message);
+        if (isMounted) {
+          setVendorDistribution([]);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error in fetchDashboardData:', error);
+      if (isMounted) {
+        setError(error.message || 'Failed to load dashboard data');
+      }
+    } finally {
+      if (isMounted) {
+        setLoading(false);
+      }
+    }
+    
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [fetchDashboardData]);
 
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      return format(parseISO(dateString), 'MMM d, yyyy');
-    } catch (e) {
-      console.error('Error formatting date:', e);
-      return 'Invalid date';
-    }
-  };
-
-  // Check if license is expired
-  const isExpired = (expirationDate) => {
-    if (!expirationDate) return false;
-    try {
-      return isBefore(parseISO(expirationDate), new Date());
-    } catch (e) {
-      console.error('Error checking expiration:', e);
-      return false;
-    }
-  };
-
-  // Check if license is expiring soon (within 30 days)
-  const isExpiringSoon = (expirationDate) => {
-    if (!expirationDate) return false;
-    try {
-      const thirtyDaysFromNow = addDays(new Date(), 30);
-      return (
-        isAfter(parseISO(expirationDate), new Date()) &&
-        isBefore(parseISO(expirationDate), thirtyDaysFromNow)
-      );
-    } catch (e) {
-      console.error('Error checking expiring soon:', e);
-      return false;
-    }
-  };
+  if (error) {
+    return (
+      <Container maxWidth="xl" sx={{ mt: 4, textAlign: 'center' }}>
+        <Typography color="error" variant="h6" gutterBottom>
+          {error}
+        </Typography>
+        <IconButton onClick={fetchDashboardData} color="primary">
+          <RefreshIcon /> Retry
+        </IconButton>
+      </Container>
+    );
+  }
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-        {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h4" component="h1">
             Dashboard
           </Typography>
-          <Box>
-            <Tooltip title="Refresh Data">
-              <IconButton onClick={fetchDashboardData} color="primary">
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+          <Tooltip title="Refresh Data">
+            <IconButton 
+              onClick={fetchDashboardData} 
+              color="primary"
+              disabled={loading}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
 
-        {/* Stats Cards */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
-                  <ArticleIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Total Licenses
+          {[
+            { 
+              title: 'Total Licenses', 
+              value: stats.totalLicenses, 
+              icon: <ArticleIcon color="primary" />,
+              color: 'primary',
+              onClick: handleLicenseCardClick,
+              clickable: true
+            },
+            { 
+              title: 'Expiring Licenses', 
+              value: stats.expiringLicenses, 
+              icon: <WarningIcon color="warning" />,
+              color: 'warning.main'
+            },
+            { 
+              title: 'Expired Licenses', 
+              value: stats.expiredLicenses, 
+              icon: <ErrorIcon color="error" />,
+              color: 'error.main'
+            },
+            { 
+              title: 'Total Customers', 
+              value: stats.totalCustomers, 
+              icon: <PeopleIcon color="primary" />,
+              color: 'primary'
+            },
+            { 
+              title: 'Total Vendors', 
+              value: stats.totalVendors, 
+              icon: <BusinessIcon color="primary" />,
+              color: 'primary'
+            }
+          ].map((item, index) => (
+            <Grid item xs={12} sm={6} md={4} lg={2} key={index}>
+              <Card 
+                elevation={3} 
+                onClick={item.onClick}
+                sx={{ 
+                  cursor: item.clickable ? 'pointer' : 'default',
+                  '&:hover': item.clickable ? { 
+                    boxShadow: 6,
+                    transform: 'translateY(-2px)',
+                    transition: 'all 0.3s ease-in-out'
+                  } : {}
+                }}
+              >
+                <CardContent>
+                  <Box display="flex" alignItems="center" mb={1}>
+                    {item.icon}
+                    <Typography color="textSecondary" variant="subtitle2" sx={{ ml: 1 }}>
+                      {item.title}
+                    </Typography>
+                  </Box>
+                  <Typography variant="h4" color={item.color}>
+                    {loading ? '...' : item.value || 0}
                   </Typography>
-                </Box>
-                <Typography variant="h4">
-                  {loading ? '...' : stats.totalLicenses || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
-                  <CheckCircleIcon color="success" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Active Licenses
-                  </Typography>
-                </Box>
-                <Typography variant="h4" color="success.main">
-                  {loading ? '...' : stats.activeLicenses || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
-                  <WarningIcon color="error" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Expired Licenses
-                  </Typography>
-                </Box>
-                <Typography variant="h4" color="error.main">
-                  {loading ? '...' : stats.expiredLicenses || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
-                  <PeopleIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Total Customers
-                  </Typography>
-                </Box>
-                <Typography variant="h4">
-                  {loading ? '...' : stats.totalCustomers || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={4} lg={2}>
-            <Card elevation={3}>
-              <CardContent>
-                <Box display="flex" alignItems="center" mb={1}>
-                  <BusinessIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography color="textSecondary" variant="subtitle2">
-                    Total Vendors
-                  </Typography>
-                </Box>
-                <Typography variant="h4">
-                  {loading ? '...' : stats.totalVendors || 0}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
 
-        {/* Main Content */}
-        <Grid container spacing={3}>
-        </Grid>
+        {/* License List Section */}
+        {showLicenses && (
+          <Grid item xs={12} sx={{ mt: 4 }}>
+            <Card elevation={3}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  All Licenses
+                </Typography>
+                {licensesLoading ? (
+                  <Box display="flex" justifyContent="center" p={4}>
+                    <CircularProgress />
+                  </Box>
+                ) : (
+                  <>
+                    <TableContainer component={Paper}>
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>License Name</TableCell>
+                            <TableCell>Customer</TableCell>
+                            <TableCell>Vendor</TableCell>
+                            <TableCell>Expiration Date</TableCell>
+                            <TableCell>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {licenses.length > 0 ? (
+                            licenses.map((license) => {
+                              const expirationDate = license.expiration_date ? new Date(license.expiration_date) : null;
+                              const today = new Date();
+                              const thirtyDaysFromNow = new Date();
+                              thirtyDaysFromNow.setDate(today.getDate() + 30);
+                              
+                              let status = 'Active';
+                              let statusColor = 'success';
+                              
+                              if (expirationDate) {
+                                if (expirationDate < today) {
+                                  status = 'Expired';
+                                  statusColor = 'error';
+                                } else if (expirationDate <= thirtyDaysFromNow) {
+                                  status = 'Expiring';
+                                  statusColor = 'warning';
+                                }
+                              }
+                              
+                              return (
+                                <TableRow key={license.id}>
+                                  <TableCell>{license.name || 'N/A'}</TableCell>
+                                  <TableCell>
+                                    {license.customer?.name || license.customer_name || 'N/A'}
+                                  </TableCell>
+                                  <TableCell>
+                                    {license.vendor?.name || license.vendor_name || 'N/A'}
+                                  </TableCell>
+                                  <TableCell>
+                                    {expirationDate ? expirationDate.toLocaleDateString() : 'N/A'}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip 
+                                      label={status}
+                                      color={statusColor}
+                                      size="small"
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={5} align="center">
+                                {licensesLoading ? 'Loading...' : 'No licenses found'}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <TablePagination
+                      rowsPerPageOptions={[5, 10, 25]}
+                      component="div"
+                      count={totalLicenses}
+                      rowsPerPage={rowsPerPage}
+                      page={page}
+                      onPageChange={handleChangePage}
+                      onRowsPerPageChange={handleChangeRowsPerPage}
+                    />
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Container>
     </LocalizationProvider>
   );

@@ -22,7 +22,7 @@ router.get('/stats', authenticate, async (req, res) => {
     );
     
     // Get licenses expiring soon (within 30 days)
-    const expiringSoon = await pool.query(
+    const expiringLicenses = await pool.query(
       `SELECT COUNT(*) 
        FROM licenses 
        WHERE expiration_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')`
@@ -36,9 +36,8 @@ router.get('/stats', authenticate, async (req, res) => {
     
     res.json({
       totalLicenses: parseInt(totalLicenses.rows[0].count, 10),
-      activeLicenses: parseInt(activeLicenses.rows[0].count, 10),
+      expiringLicenses: parseInt(expiringLicenses.rows[0].count, 10),
       expiredLicenses: parseInt(expiredLicenses.rows[0].count, 10),
-      expiringSoon: parseInt(expiringSoon.rows[0].count, 10),
       totalCustomers: parseInt(totalCustomers.rows[0].count, 10),
       totalVendors: parseInt(totalVendors.rows[0].count, 10)
     });

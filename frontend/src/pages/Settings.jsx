@@ -62,18 +62,18 @@ function TabPanel(props) {
   const { children, value, index, ...other } = props;
 
   return (
-    <div
+    <Box
       role="tabpanel"
       hidden={value !== index}
       id={`settings-tabpanel-${index}`}
       aria-labelledby={`settings-tab-${index}`}
-      style={{ width: '100%' }}
+      sx={{ width: '100%', display: value === index ? 'block' : 'none' }}
       {...other}
     >
-      <Box sx={{ p: 3, display: value === index ? 'block' : 'none' }}>
+      <Box sx={{ p: 3 }} component="div">
         {children}
       </Box>
-    </div>
+    </Box>
   );
 }
 
@@ -124,7 +124,7 @@ const ProfileSchema = Yup.object().shape({
 });
 
 function Settings() {
-  const [tabValue, setTabValue] = useState(0);
+  const [tabValue, setTabValue] = useState(null);
   const [error, setError] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({
     daysBeforeExpiration: 30,
@@ -233,6 +233,10 @@ function Settings() {
       mounted = false;
     };
   }, [fetchData]);
+
+  useEffect(() => {
+    setTabValue(0);
+  }, []);
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
@@ -436,6 +440,12 @@ function Settings() {
     );
   }
 
+  if (tabValue === null) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+      <CircularProgress />
+    </Box>;
+  }
+
   return (
     <ErrorBoundary
       FallbackComponent={ErrorFallback}
@@ -448,7 +458,7 @@ function Settings() {
       <Container maxWidth="lg">
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
-          Settings
+          <Box component="span">Settings</Box>
         </Typography>
         
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -506,8 +516,8 @@ function Settings() {
                     </Grid>
                     
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                        Change Password (leave blank to keep current password)
+                      <Typography variant="subtitle2" color="textSecondary" gutterBottom component="div">
+                        <Box component="span">Change Password (leave blank to keep current password)</Box>
                       </Typography>
                       
                       <Field
